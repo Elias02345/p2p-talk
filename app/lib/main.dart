@@ -23,6 +23,11 @@ import 'screens/onboarding_screen.dart';
 const kPrefServerUrl = 'p2ptalk_server_url';
 const kPrefIntercomMode = 'p2ptalk_intercom_mode';
 
+/// Optional build-time default so a released APK ships preconfigured and works
+/// standalone without the user typing a server URL:
+///   flutter build apk --release --dart-define=DEFAULT_SERVER_URL=wss://p2p-talk.example.com
+const kDefaultServerUrl = String.fromEnvironment('DEFAULT_SERVER_URL', defaultValue: '');
+
 /// One-time migration of legacy GymTalk preference keys to the new namespace.
 Future<void> _migratePrefs(SharedPreferences prefs) async {
   const map = {
@@ -44,7 +49,12 @@ Future<void> main() async {
   final prefs = await SharedPreferences.getInstance();
   await _migratePrefs(prefs);
 
-  final serverUrl = prefs.getString(kPrefServerUrl) ?? '';
+  var serverUrl = prefs.getString(kPrefServerUrl) ?? '';
+  // Fall back to a build-time baked URL so a preconfigured APK works standalone.
+  if (serverUrl.isEmpty && kDefaultServerUrl.isNotEmpty) {
+    serverUrl = kDefaultServerUrl;
+    await prefs.setString(kPrefServerUrl, serverUrl);
+  }
   final isIntercomMode = prefs.getBool(kPrefIntercomMode) ?? false;
 
   final account = AccountService();

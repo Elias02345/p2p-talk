@@ -28,5 +28,15 @@ services:
       - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
     command: ["-c", "/etc/coturn/turnserver.conf"]
 
+  # Optional bundled Cloudflare Tunnel (enabled via compose profile "tunnel"
+  # when TUNNEL_TOKEN is set). Skip this if CloudGate manages the tunnel.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: p2ptalk-cloudflared
+    profiles: ["tunnel"]
+    network_mode: host
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${TUNNEL_TOKEN}"]
+
 volumes:
   p2ptalk-data:

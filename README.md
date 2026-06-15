@@ -71,9 +71,16 @@ The installer is idempotent: installs Docker, generates `JWT_SECRET` and
 `TURN_SHARED_SECRET` into `.env`, renders the coturn config, builds and starts
 the stack, and registers systemd units (including a 10-minute **auto-update** timer).
 
-**cgNAT / CloudGate routing** (important for the relay fallback):
-- forward `443` → `127.0.0.1:3000` (carries `wss://` + `https://`)
-- forward the TURN **TCP/TLS** port (`5349`) → coturn — UDP relay will not survive a TLS-only tunnel.
+**Behind cgNAT (no public IP)** — see [server/docs/DEPLOYMENT_CLOUDFLARE.md](server/docs/DEPLOYMENT_CLOUDFLARE.md).
+Cloudflare Tunnel / CloudGate carries the signaling (`wss://`); for the relay
+fallback set `TURN_MODE=cloudflare` (Cloudflare managed TURN — works behind cgNAT,
+no public IP). Direct P2P calls work over STUN without any relay.
+
+```bash
+# cgNAT box, signaling via CloudGate + Cloudflare managed TURN:
+sudo TURN_MODE=cloudflare CF_TURN_KEY_ID=... CF_TURN_API_TOKEN=... \
+     PUBLIC_HOST=p2p-talk.example.com bash install.sh
+```
 
 Operations:
 
@@ -91,8 +98,11 @@ sudo bash doctor.sh --repair   # diagnose & repair
 | `PUBLIC_HOST` | Public domain clients connect to |
 | `JWT_SECRET` | Session-token signing secret (generated) |
 | `TURN_SHARED_SECRET` | Shared with coturn for ephemeral creds (generated) |
+| `TURN_MODE` | Relay provider: `coturn` / `cloudflare` (cgNAT) / `static` / `none` |
+| `CF_TURN_KEY_ID` / `CF_TURN_API_TOKEN` | Cloudflare managed TURN (cgNAT, no public IP) |
 | `TURN_HOST` / `TURN_PORT` / `TURN_TLS_PORT` | coturn endpoints |
 | `TURN_TRANSPORT` | `tls-first` (cgNAT) or `udp-first` (public IP) |
+| `TUNNEL_TOKEN` | Optional bundled cloudflared tunnel token |
 | `UPDATE_BRANCH` | Auto-update channel (`main` / `dev`) |
 | `DB_PATH` | SQLite path (**sacred** — never touched by the updater) |
 

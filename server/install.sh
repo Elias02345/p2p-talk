@@ -57,6 +57,13 @@ if [[ -n "${PUBLIC_HOST}" ]]; then
   set_env_value "${ENV_FILE}" PUBLIC_HOST "${PUBLIC_HOST}"
   set_env_value "${ENV_FILE}" TURN_HOST "${PUBLIC_HOST}"
 fi
+
+# Optional relay/tunnel settings passed via environment (preserved on re-run).
+[[ -n "${TURN_MODE:-}" ]]         && set_env_value "${ENV_FILE}" TURN_MODE "${TURN_MODE}"
+[[ -n "${CF_TURN_KEY_ID:-}" ]]    && set_env_value "${ENV_FILE}" CF_TURN_KEY_ID "${CF_TURN_KEY_ID}"
+[[ -n "${CF_TURN_API_TOKEN:-}" ]] && set_env_value "${ENV_FILE}" CF_TURN_API_TOKEN "${CF_TURN_API_TOKEN}"
+[[ -n "${TUNNEL_TOKEN:-}" ]]      && set_env_value "${ENV_FILE}" TUNNEL_TOKEN "${TUNNEL_TOKEN}"
+
 chmod 600 "${ENV_FILE}"
 ok "Environment configured (secrets generated where missing)"
 
@@ -80,8 +87,13 @@ log "Network mode: ${NETWORK_MODE} (${ACTIVE_COMPOSE})"
 log "Building and starting the stack (first run may take a while)..."
 CMD="$(compose_cmd)"
 cd "${DOCKER_DIR}"
-retry 3 20 ${CMD} -f "${ACTIVE_COMPOSE}" --env-file "${ENV_FILE}" build
-retry 3 10 ${CMD} -f "${ACTIVE_COMPOSE}" --env-file "${ENV_FILE}" up -d
+PROFILE_ARGS=()
+if grep -q '^TUNNEL_TOKEN=.\+' "${ENV_FILE}"; then
+  PROFILE_ARGS=(--profile tunnel)
+  log "Cloudflare Tunnel enabled (bundled cloudflared container)"
+fi
+retry 3 20 ${CMD} -f "${ACTIVE_COMPOSE}" --env-file "${ENV_FILE}" "${PROFILE_ARGS[@]}" build
+retry 3 10 ${CMD} -f "${ACTIVE_COMPOSE}" --env-file "${ENV_FILE}" "${PROFILE_ARGS[@]}" up -d
 
 # --- 6. systemd registration ----------------------------------------------
 log "Installing systemd units..."

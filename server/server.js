@@ -343,9 +343,14 @@ app.post('/api/auth/verify', authLimiter, async (req, res) => {
 // REST: authenticated endpoints
 // ---------------------------------------------------------------------------
 
-// Ephemeral ICE servers (STUN + short-lived TURN credentials).
-app.get('/api/ice', auth.requireAuth, (req, res) => {
-  res.json(ice.getIceServers(req.account.id));
+// ICE servers (STUN + relay credentials, provider depends on TURN_MODE).
+app.get('/api/ice', auth.requireAuth, async (req, res) => {
+  try {
+    res.json(await ice.getIceServers(req.account.id));
+  } catch (error) {
+    console.error('[API] ice error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
 });
 
 // List this account's enrolled devices.

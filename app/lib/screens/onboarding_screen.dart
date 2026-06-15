@@ -19,7 +19,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   int _currentPage = 0;
   bool _busy = false;
   final _usernameController = TextEditingController();
-  final _serverController = TextEditingController(text: 'wss://');
+  final _serverController =
+      TextEditingController(text: kDefaultServerUrl.isNotEmpty ? kDefaultServerUrl : 'wss://');
 
   static const neonCyan = Color(0xFF00E5FF);
   static const darkBg = Color(0xFF0F111A);

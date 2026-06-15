@@ -1,66 +1,112 @@
 // ---------------------------------------------------------------------------
-// ice.js — ephemeral TURN/STUN credentials for WebRTC ICE
+// ice.js — ICE (STUN/TURN) configuration for WebRTC, provider-flexible.
 //
-// Produces short-lived coturn credentials using the standard "TURN REST API"
-// long-term-credential mechanism (coturn `use-auth-secret` + `static-auth-secret`):
+// Deployment is cgNAT / CloudGate (a Cloudflare Tunnel manager), which carries
+// only HTTP/HTTPS/WebSocket. A *self-hosted* TURN (raw UDP/TCP) cannot traverse
+// that tunnel, so TURN_MODE selects how the relay fallback is provided:
 //
-//   username = "<unix-expiry>:<accountId>"
-//   password = base64( HMAC_SHA1( TURN_SHARED_SECRET, username ) )
+//   coturn     — self-hosted coturn with ephemeral HMAC creds (needs a publicly
+//                reachable TURN port; e.g. a small VPS or CloudGate raw-TCP).
+//   cloudflare — Cloudflare's managed TURN (rtc.live.cloudflare.com). Works
+//                behind cgNAT with NO public IP — the recommended relay here.
+//   static     — any hosted TURN via fixed URLs + credentials.
+//   none       — STUN only (direct P2P works in most networks; no relay).
 //
-// coturn validates the HMAC itself, so the shared secret never leaves the server
-// and the app never ships static TURN credentials.
-//
-// Deployment is cgNAT / CloudGate tunnel: relay over UDP will not traverse a
-// TLS-only tunnel, so TURN-over-TLS (turns:) and TURN-over-TCP are emitted FIRST.
-// ICE still prefers any working direct (host/srflx) path automatically by
-// candidate priority — relay is only used when no direct path validates.
+// ICE always prefers a direct path; relay is only the fallback.
 // ---------------------------------------------------------------------------
 
 const crypto = require('crypto');
 
+const TURN_MODE = (process.env.TURN_MODE || 'coturn').toLowerCase();
+
+// coturn
 const TURN_SHARED_SECRET = process.env.TURN_SHARED_SECRET || '';
 const TURN_HOST = process.env.TURN_HOST || process.env.PUBLIC_HOST || '';
 const TURN_PORT = parseInt(process.env.TURN_PORT, 10) || 3478;
 const TURN_TLS_PORT = parseInt(process.env.TURN_TLS_PORT, 10) || 5349;
-const TURN_TTL = parseInt(process.env.TURN_TTL, 10) || 3600; // 1h
-// "tls-first" (cgNAT default) | "udp-first" (public-IP) — controls ordering only.
+const TURN_TTL = parseInt(process.env.TURN_TTL, 10) || 3600;
 const TURN_TRANSPORT = (process.env.TURN_TRANSPORT || 'tls-first').toLowerCase();
 
-/**
- * Generate an iceServers list with ephemeral TURN credentials for an account.
- * Returns { iceServers, ttl }. If TURN is not configured, returns STUN-only.
- */
-function getIceServers(accountId) {
-  // STUN: prefer the project's own coturn (no third-party leak of who connects),
-  // with a public fallback so direct/srflx still works if coturn is unreachable.
-  const iceServers = [];
+// cloudflare
+const CF_TURN_KEY_ID = process.env.CF_TURN_KEY_ID || '';
+const CF_TURN_API_TOKEN = process.env.CF_TURN_API_TOKEN || '';
 
-  if (TURN_HOST) {
-    iceServers.push({ urls: `stun:${TURN_HOST}:${TURN_PORT}` });
-  }
-  iceServers.push({ urls: 'stun:stun.l.google.com:19302' });
+// static
+const STATIC_TURN_URLS = (process.env.TURN_URLS || '').split(',').map((s) => s.trim()).filter(Boolean);
+const STATIC_TURN_USERNAME = process.env.TURN_USERNAME || '';
+const STATIC_TURN_CREDENTIAL = process.env.TURN_CREDENTIAL || '';
+
+const PUBLIC_STUN = { urls: 'stun:stun.l.google.com:19302' };
+
+function coturnServers(accountId) {
+  const iceServers = [];
+  if (TURN_HOST) iceServers.push({ urls: `stun:${TURN_HOST}:${TURN_PORT}` });
+  iceServers.push(PUBLIC_STUN);
 
   if (TURN_HOST && TURN_SHARED_SECRET) {
     const expiry = Math.floor(Date.now() / 1000) + TURN_TTL;
     const username = `${expiry}:${accountId}`;
-    const credential = crypto
-      .createHmac('sha1', TURN_SHARED_SECRET)
-      .update(username)
-      .digest('base64');
-
+    const credential = crypto.createHmac('sha1', TURN_SHARED_SECRET).update(username).digest('base64');
     const tcp = { urls: `turn:${TURN_HOST}:${TURN_PORT}?transport=tcp`, username, credential };
     const tls = { urls: `turns:${TURN_HOST}:${TURN_TLS_PORT}?transport=tcp`, username, credential };
     const udp = { urls: `turn:${TURN_HOST}:${TURN_PORT}?transport=udp`, username, credential };
-
-    if (TURN_TRANSPORT === 'udp-first') {
-      iceServers.push(udp, tcp, tls);
-    } else {
-      // cgNAT / CloudGate: TLS and TCP relay first (survive a TLS-only tunnel).
-      iceServers.push(tls, tcp, udp);
-    }
+    iceServers.push(...(TURN_TRANSPORT === 'udp-first' ? [udp, tcp, tls] : [tls, tcp, udp]));
   }
-
   return { iceServers, ttl: TURN_TTL };
 }
 
-module.exports = { getIceServers };
+function staticServers() {
+  const iceServers = [PUBLIC_STUN];
+  if (STATIC_TURN_URLS.length) {
+    iceServers.push({
+      urls: STATIC_TURN_URLS,
+      username: STATIC_TURN_USERNAME,
+      credential: STATIC_TURN_CREDENTIAL,
+    });
+  }
+  return { iceServers, ttl: TURN_TTL };
+}
+
+// Cloudflare's managed TURN: a back-end mints short-lived creds with the TURN key.
+async function cloudflareServers() {
+  if (!CF_TURN_KEY_ID || !CF_TURN_API_TOKEN) {
+    return { iceServers: [PUBLIC_STUN], ttl: 0 };
+  }
+  try {
+    const res = await fetch(
+      `https://rtc.live.cloudflare.com/v1/turn/keys/${CF_TURN_KEY_ID}/credentials/generate-ice-servers`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${CF_TURN_API_TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ttl: TURN_TTL }),
+      }
+    );
+    if (!res.ok) {
+      console.error('[ICE] Cloudflare TURN error:', res.status);
+      return { iceServers: [PUBLIC_STUN], ttl: 0 };
+    }
+    const data = await res.json();
+    const servers = Array.isArray(data.iceServers) ? data.iceServers : [data.iceServers];
+    return { iceServers: servers, ttl: TURN_TTL };
+  } catch (err) {
+    console.error('[ICE] Cloudflare TURN fetch failed:', err.message);
+    return { iceServers: [PUBLIC_STUN], ttl: 0 };
+  }
+}
+
+/** Returns { iceServers, ttl }. Async (the cloudflare provider calls an API). */
+async function getIceServers(accountId) {
+  switch (TURN_MODE) {
+    case 'none':
+      return { iceServers: [PUBLIC_STUN], ttl: 0 };
+    case 'static':
+      return staticServers();
+    case 'cloudflare':
+      return cloudflareServers();
+    case 'coturn':
+    default:
+      return coturnServers(accountId);
+  }
+}
+
+module.exports = { getIceServers, TURN_MODE };

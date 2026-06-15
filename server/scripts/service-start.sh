@@ -18,6 +18,13 @@ COMPOSE_FILE="${DOCKER_DIR}/${ACTIVE}"
 CMD="$(compose_cmd)" || fail "docker compose is not installed"
 cd "${DOCKER_DIR}"
 
+# Enable the bundled Cloudflare Tunnel only when a token is configured.
+PROFILE_ARGS=()
+if grep -q '^TUNNEL_TOKEN=.\+' "${SERVER_DIR}/.env" 2>/dev/null; then
+  PROFILE_ARGS=(--profile tunnel)
+  log "Cloudflare Tunnel enabled (bundled cloudflared)"
+fi
+
 dump_on_failure() {
   err "Stack failed to start — dumping status and logs:"
   ${CMD} -f "${COMPOSE_FILE}" --env-file "${SERVER_DIR}/.env" ps || true
@@ -26,11 +33,11 @@ dump_on_failure() {
 trap dump_on_failure ERR
 
 log "Validating compose config (${ACTIVE})..."
-${CMD} -f "${COMPOSE_FILE}" --env-file "${SERVER_DIR}/.env" config -q
+${CMD} -f "${COMPOSE_FILE}" --env-file "${SERVER_DIR}/.env" "${PROFILE_ARGS[@]}" config -q
 
 log "Building images (with retry)..."
-retry 3 20 ${CMD} -f "${COMPOSE_FILE}" --env-file "${SERVER_DIR}/.env" build
+retry 3 20 ${CMD} -f "${COMPOSE_FILE}" --env-file "${SERVER_DIR}/.env" "${PROFILE_ARGS[@]}" build
 
 log "Starting stack (attached; systemd supervises)..."
 trap - ERR
-exec ${CMD} -f "${COMPOSE_FILE}" --env-file "${SERVER_DIR}/.env" up --abort-on-container-exit
+exec ${CMD} -f "${COMPOSE_FILE}" --env-file "${SERVER_DIR}/.env" "${PROFILE_ARGS[@]}" up --abort-on-container-exit
