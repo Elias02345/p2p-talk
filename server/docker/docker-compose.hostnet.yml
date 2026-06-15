@@ -1,0 +1,29 @@
+# p2p-talk stack — Host-network mode (homelab / LAN, no reverse proxy).
+# The signaling server binds the host directly. Use only when there is no proxy
+# in front of it. coturn also uses host networking for the relay ports.
+
+name: p2ptalk
+
+services:
+  signaling:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: p2ptalk-signaling
+    env_file: ../.env
+    network_mode: host
+    volumes:
+      - p2ptalk-data:/app/data
+    restart: unless-stopped
+
+  coturn:
+    image: coturn/coturn:4.6
+    container_name: p2ptalk-coturn
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+
+volumes:
+  p2ptalk-data:

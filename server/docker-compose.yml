@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  gymtalk-signaling:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - .env
+    volumes:
+      # Persist SQLite database across container restarts
+      - gymtalk-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  gymtalk-data:

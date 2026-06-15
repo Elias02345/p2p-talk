@@ -1,0 +1,39 @@
+# coturn configuration for p2p-talk (rendered from this template by install.sh).
+# Placeholders ${...} are substituted with values from server/.env.
+#
+# Deployment is cgNAT / CloudGate: CloudGate terminates TLS for turns:// and
+# forwards it to coturn's plain TCP listening-port, so coturn itself needs no
+# certificate. The app's /api/ice hands out turns:/transport=tcp URLs first.
+
+listening-port=${TURN_PORT}
+
+# Time-limited credentials: the signaling server computes
+#   username = "<expiry>:<accountId>", password = base64(HMAC_SHA1(secret, username))
+# coturn validates the HMAC with the same shared secret. No static credentials
+# are ever shipped in the app.
+use-auth-secret
+static-auth-secret=${TURN_SHARED_SECRET}
+realm=${TURN_REALM}
+
+fingerprint
+no-cli
+no-multicast-peers
+
+# Narrow relay port range — open exactly these in the firewall / forward via CloudGate.
+min-port=49160
+max-port=49200
+
+# Hardening: never relay to private/loopback ranges (SSRF protection).
+no-loopback-peers
+denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+denied-peer-ip=::1
+denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+
+# Logging
+log-file=stdout
+simple-log

@@ -1,0 +1,32 @@
+# p2p-talk stack — Standard / CloudGate mode.
+# The Node signaling server binds to 127.0.0.1 only; CloudGate (or a reverse
+# proxy) terminates TLS and forwards public wss://https:// traffic to it.
+# coturn uses host networking because TURN relay needs a wide UDP/TCP port range
+# and must advertise the host's reachable address in ICE candidates.
+
+name: p2ptalk
+
+services:
+  signaling:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: p2ptalk-signaling
+    env_file: ../.env
+    ports:
+      - "127.0.0.1:${PORT:-3000}:3000"
+    volumes:
+      - p2ptalk-data:/app/data
+    restart: unless-stopped
+
+  coturn:
+    image: coturn/coturn:4.6
+    container_name: p2ptalk-coturn
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+
+volumes:
+  p2ptalk-data:

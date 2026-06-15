@@ -1,0 +1,9 @@
+[Unit]
+Description=p2p-talk headless auto-updater
+After=network-online.target p2ptalk-signaling.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=__SERVER_DIR__
+ExecStart=/usr/bin/env bash __SERVER_DIR__/scripts/updater-daemon.sh

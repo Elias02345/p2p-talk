@@ -1,0 +1,16 @@
+[Unit]
+Description=p2p-talk signaling + TURN stack (Docker Compose)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=__SERVER_DIR__
+ExecStart=/usr/bin/env bash __SERVER_DIR__/scripts/service-start.sh
+Restart=always
+RestartSec=5
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target
