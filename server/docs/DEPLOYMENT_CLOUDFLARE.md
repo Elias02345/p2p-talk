@@ -12,7 +12,7 @@ TURN relay needs raw UDP/TCP that the tunnel cannot carry to arbitrary clients.
 
 | Piece | Transport | Works over Cloudflare Tunnel / CloudGate? |
 |---|---|---|
-| Signaling (`wss://`, `/api/*`) | HTTPS/WebSocket | ✅ yes |
+| Signaling (`https://` HTTP long-poll, `/api/*`) | HTTPS | ✅ yes |
 | Direct P2P calls (STUN) | UDP between phones | ✅ yes (no server needed) |
 | Relay fallback (TURN) | UDP/TCP from phones | ❌ not via the tunnel — use one of the relay options below |
 
@@ -34,12 +34,14 @@ does **not** use a "CloudGate IP" — it uses your hostname.
    is reachable on your LAN at `http://<server-ip>:3000`.
 2. In CloudGate, add a service: **hostname** `p2p-talk.<your-domain>` →
    **service** `http://<server-ip>:3000` (e.g. `http://192.168.1.129:3000`).
-3. App onboarding: **`wss://p2p-talk.<your-domain>`** — Cloudflare provides TLS
+3. App onboarding: **`https://p2p-talk.<your-domain>`** — Cloudflare provides TLS
    automatically, so no port and no certificate are needed.
 
-> `PUBLIC_HOST` is your **hostname**, never an IP. The server binding to
-> `0.0.0.0` is only so the CloudGate VM can reach it on the LAN. On the same LAN
-> you can also test directly with `ws://<server-ip>:3000` (cleartext is allowed).
+> **Signaling runs over plain HTTP long-poll** (`/api/rtc/poll` + `/api/rtc/send`),
+> not WebSockets — so it traverses CloudGate / any HTTP-only tunnel. `PUBLIC_HOST`
+> is your **hostname**, never an IP. The `0.0.0.0` bind is only so the CloudGate VM
+> can reach the server on the LAN. On the same LAN you can also test directly with
+> `http://<server-ip>:3000` (cleartext is allowed).
 
 ### Option B — bundled cloudflared
 1. Create a tunnel in the Cloudflare dashboard, copy the **tunnel token**, and map
@@ -80,12 +82,12 @@ Direct P2P only; no relay fallback. Fine for testing or LAN use.
 
 ## 3. App
 
-On first launch the user enters `wss://p2p-talk.<your-domain>`. To ship a
+On first launch the user enters `https://p2p-talk.<your-domain>`. To ship a
 preconfigured ("standalone") APK that needs no manual entry:
 
 ```bash
 flutter build apk --release --split-per-abi \
-  --dart-define=DEFAULT_SERVER_URL=wss://p2p-talk.<your-domain>
+  --dart-define=DEFAULT_SERVER_URL=https://p2p-talk.<your-domain>
 ```
 
 ## Recommended cgNAT setup (summary)

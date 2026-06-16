@@ -782,6 +782,30 @@ abstract class AppLocalizations {
   /// **'Restore from recovery phrase'**
   String get onbRestoreAccount;
 
+  /// No description provided for @onbSkip.
+  ///
+  /// In en, this message translates to:
+  /// **'Use without an account'**
+  String get onbSkip;
+
+  /// No description provided for @onbLocalModeNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Without an account you can explore the app; connecting with partners needs a server.'**
+  String get onbLocalModeNote;
+
+  /// No description provided for @settingsNoAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'No account yet'**
+  String get settingsNoAccount;
+
+  /// No description provided for @settingsCreateAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Set up account'**
+  String get settingsCreateAccount;
+
   /// No description provided for @onbUsername.
   ///
   /// In en, this message translates to:
@@ -791,7 +815,7 @@ abstract class AppLocalizations {
   /// No description provided for @onbServerUrl.
   ///
   /// In en, this message translates to:
-  /// **'Server URL (e.g. ws://203.0.113.5:3000 or wss://p2p-talk.example.com)'**
+  /// **'Server URL (e.g. https://p2p-talk.example.com or http://192.168.1.129:3000)'**
   String get onbServerUrl;
 
   /// No description provided for @onbRecoveryTitle.

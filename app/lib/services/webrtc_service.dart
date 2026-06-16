@@ -2,8 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
-import 'package:web_socket_channel/status.dart' as ws_status;
+import 'package:http/http.dart' as http;
 import 'audio_manager.dart';
 import 'connection_manager.dart';
 import 'notification_service.dart';
@@ -18,9 +17,9 @@ class WebRTCService extends ChangeNotifier {
   final NotificationService _notificationService;
   final AccountService _account;
 
-  String _serverUrl = 'ws://localhost:3000';
-  WebSocketChannel? _channel;
-  bool _isWebSocketConnected = false;
+  String _serverUrl = 'http://localhost:3000';
+  bool _isWebSocketConnected = false; // true while the HTTP long-poll loop runs
+  int _pollGen = 0; // bump to cancel an in-flight poll loop
 
   // Multi-peer WebRTC: peerId (accountId) -> objects
   final Map<String, RTCPeerConnection> _peerConnections = {};
@@ -41,7 +40,6 @@ class WebRTCService extends ChangeNotifier {
   bool _intentionalDisconnect = false;
   bool _appForeground = true;
   bool _intercomActive = false;
-  DateTime? _lastPingSent;
 
   // Cached ICE configuration from /api/ice
   Map<String, dynamic>? _iceConfig;
@@ -98,55 +96,79 @@ class WebRTCService extends ChangeNotifier {
     _intercomActive = active;
   }
 
-  // --- WebSocket ------------------------------------------------------------
+  // --- HTTP long-poll signaling (CloudGate / plain HTTP, no WebSocket) ------
 
+  String get _httpBase => _serverUrl
+      .replaceFirst('ws://', 'http://')
+      .replaceFirst('wss://', 'https://')
+      .replaceAll(RegExp(r'/+$'), '');
+
+  /// Connect the signaling transport (HTTP long-poll). Name kept for callers.
   Future<void> connectWebSocket() async {
     if (!_account.isRegistered) return;
     _intentionalDisconnect = false;
-    await disconnectWebSocket(intentional: false);
+    if (_isWebSocketConnected) return; // already polling
 
     final token = await _account.getToken();
     if (token == null) {
-      log('No session token — cannot connect WS');
+      log('No session token — cannot connect signaling');
       _scheduleReconnect();
       return;
     }
 
-    try {
-      log('Connecting to signaling server: $_serverUrl');
-      _channel = WebSocketChannel.connect(Uri.parse(_serverUrl));
-      _isWebSocketConnected = true;
-      notifyListeners();
+    log('Connecting signaling (HTTP) to: $_httpBase');
+    _isWebSocketConnected = true;
+    if (_connectionManager.reconnectAttempts > 0) _notificationService.notifyReconnected();
+    _connectionManager.onConnected();
+    _connectionManager.resetReconnect();
+    notifyListeners();
+    _startLatencyTimer();
+    _pollLoop(++_pollGen);
+  }
 
-      _sendWS({'type': 'register', 'token': token});
-
-      _channel!.stream.listen(
-        _handleWSMessage,
-        onDone: () {
-          _isWebSocketConnected = false;
-          _connectionState = _peerConnections.isEmpty
-              ? P2PConnectionState.disconnected
-              : _connectionState;
-          _stopLatencyTimer();
-          notifyListeners();
-          log('Signaling connection closed.');
-          if (!_intentionalDisconnect) {
-            _notificationService.notifyConnectionLost();
-            _scheduleReconnect();
+  Future<void> _pollLoop(int gen) async {
+    while (_isWebSocketConnected && !_intentionalDisconnect && gen == _pollGen) {
+      try {
+        final token = await _account.getToken();
+        if (token == null) {
+          _onSignalingDown();
+          return;
+        }
+        final res = await http
+            .post(Uri.parse('$_httpBase/api/rtc/poll'),
+                headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'},
+                body: '{}')
+            .timeout(const Duration(seconds: 35));
+        if (gen != _pollGen) return; // superseded by a newer loop
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          final msgs = (data['messages'] as List?) ?? const [];
+          for (final m in msgs) {
+            await _handleSignal(Map<String, dynamic>.from(m));
           }
-        },
-        onError: (err) {
-          _isWebSocketConnected = false;
-          _stopLatencyTimer();
-          notifyListeners();
-          log('Signaling error: $err');
-          if (!_intentionalDisconnect) _scheduleReconnect();
-        },
-      );
-    } catch (e) {
-      _isWebSocketConnected = false;
-      notifyListeners();
-      log('WebSocket connect failed: $e');
+        } else if (res.statusCode == 401) {
+          continue; // token expired — refreshed next iteration
+        } else {
+          _onSignalingDown();
+          return;
+        }
+      } catch (e) {
+        log('poll error: $e');
+        _onSignalingDown();
+        return;
+      }
+    }
+  }
+
+  void _onSignalingDown() {
+    if (!_isWebSocketConnected) return;
+    _isWebSocketConnected = false;
+    _stopLatencyTimer();
+    if (_peerConnections.isEmpty) _connectionState = P2PConnectionState.disconnected;
+    notifyListeners();
+    log('Signaling connection lost.');
+    if (!_intentionalDisconnect) {
+      _notificationService.notifyConnectionLost();
       _scheduleReconnect();
     }
   }
@@ -167,41 +189,43 @@ class WebRTCService extends ChangeNotifier {
     _intentionalDisconnect = intentional;
     _reconnectTimer?.cancel();
     _stopLatencyTimer();
-    if (_channel != null) {
-      await _channel!.sink.close(ws_status.normalClosure);
-      _channel = null;
-    }
+    _pollGen++; // cancel any in-flight poll loop
+    final wasConnected = _isWebSocketConnected;
     _isWebSocketConnected = false;
     notifyListeners();
-  }
-
-  void _sendWS(Map<String, dynamic> data) {
-    if (_channel != null && _isWebSocketConnected) {
-      try {
-        _channel!.sink.add(jsonEncode(data));
-      } catch (e) {
-        log('WS send error: $e');
+    if (intentional && wasConnected) {
+      final token = await _account.getToken();
+      if (token != null) {
+        try {
+          await http
+              .post(Uri.parse('$_httpBase/api/rtc/disconnect'),
+                  headers: {'Authorization': 'Bearer $token'})
+              .timeout(const Duration(seconds: 5));
+        } catch (_) {}
       }
     }
   }
 
-  void _handleWSMessage(dynamic messageText) async {
-    Map<String, dynamic> msg;
-    try {
-      msg = jsonDecode(messageText);
-    } catch (_) {
-      return;
-    }
-    final type = msg['type'];
-    switch (type) {
-      case 'registered':
-        log('Registered on signaling server.');
-        _connectionManager.onConnected();
-        if (_connectionManager.reconnectAttempts > 0) _notificationService.notifyReconnected();
-        _connectionManager.resetReconnect();
-        _startLatencyTimer();
-        break;
+  /// Send a signaling message (fire-and-forget HTTP POST).
+  void _send(Map<String, dynamic> data) {
+    if (!_isWebSocketConnected) return;
+    () async {
+      final token = await _account.getToken();
+      if (token == null) return;
+      try {
+        await http
+            .post(Uri.parse('$_httpBase/api/rtc/send'),
+                headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'},
+                body: jsonEncode(data))
+            .timeout(const Duration(seconds: 10));
+      } catch (e) {
+        log('signal send error: $e');
+      }
+    }();
+  }
 
+  Future<void> _handleSignal(Map<String, dynamic> msg) async {
+    switch (msg['type']) {
       case 'contact_request':
         _notificationService.notifyContactRequest(msg['from'] ?? '');
         break;
@@ -236,7 +260,6 @@ class WebRTCService extends ChangeNotifier {
       case 'room_joined':
         final members = List<String>.from(msg['members'] ?? []);
         _connectionManager.setRoom(RoomInfo(id: msg['roomId'], name: 'Room', memberIds: members));
-        // Connect to existing members; deterministic offerer = smaller id.
         for (final m in members) {
           if (m == _account.accountId) continue;
           _connectionManager.addPeer(m, 'Peer');
@@ -255,27 +278,16 @@ class WebRTCService extends ChangeNotifier {
         break;
 
       case 'room_member_left':
-        final peerId = msg['userId'];
-        _connectionManager.removePeer(peerId);
-        await _disconnectPeer(peerId);
+        _connectionManager.removePeer(msg['userId']);
+        await _disconnectPeer(msg['userId']);
         break;
 
       case 'room_signaling':
         await _handleSignalingPayload(msg['from'], msg['payload']);
         break;
 
-      case 'pong':
-        if (_lastPingSent != null) {
-          _connectionManager.updateLatency(DateTime.now().difference(_lastPingSent!).inMilliseconds);
-        }
-        break;
-
-      case 'ping':
-        _sendWS({'type': 'pong'});
-        break;
-
       case 'error':
-        log('Server error: ${msg['message']}');
+        log('Server: ${msg['message']}');
         break;
     }
   }
@@ -290,19 +302,19 @@ class WebRTCService extends ChangeNotifier {
     _connectionState = P2PConnectionState.connecting;
     _activePartnerId = targetId;
     notifyListeners();
-    _sendWS({'type': 'call_request', 'targetId': targetId, 'autoConnect': autoConnect});
+    _send({'type': 'call_request', 'targetId': targetId, 'autoConnect': autoConnect});
   }
 
   Future<void> acceptCall(String targetId) async {
     _activePartnerId = targetId;
     _connectionState = P2PConnectionState.connecting;
     notifyListeners();
-    _sendWS({'type': 'call_response', 'targetId': targetId, 'accepted': true});
+    _send({'type': 'call_response', 'targetId': targetId, 'accepted': true});
     await _startCallSession(targetId, isInitiator: false);
   }
 
   Future<void> rejectCall(String targetId) async {
-    _sendWS({'type': 'call_response', 'targetId': targetId, 'accepted': false});
+    _send({'type': 'call_response', 'targetId': targetId, 'accepted': false});
     if (_activePartnerId == targetId) {
       _activePartnerId = null;
       _connectionState = P2PConnectionState.disconnected;
@@ -312,7 +324,7 @@ class WebRTCService extends ChangeNotifier {
 
   Future<void> joinGroupRoom(String roomId, {String? roomName}) async {
     if (!_account.isRegistered) return;
-    _sendWS({'type': 'join_room', 'roomId': roomId, 'username': _account.username});
+    _send({'type': 'join_room', 'roomId': roomId, 'username': _account.username});
     _connectionState = P2PConnectionState.connecting;
     notifyListeners();
   }
@@ -320,7 +332,7 @@ class WebRTCService extends ChangeNotifier {
   Future<void> leaveGroupRoom() async {
     final room = _connectionManager.currentRoom;
     if (room == null) return;
-    _sendWS({'type': 'leave_room', 'roomId': room.id});
+    _send({'type': 'leave_room', 'roomId': room.id});
     for (final peerId in List.from(_peerConnections.keys)) {
       await _disconnectPeer(peerId);
     }
@@ -607,7 +619,7 @@ class WebRTCService extends ChangeNotifier {
 
   void _sendSignaling(String targetId, Map<String, dynamic> payload) {
     final inRoom = _connectionManager.isInGroup;
-    _sendWS({
+    _send({
       'type': inRoom ? 'room_signaling' : 'signaling',
       if (inRoom) 'roomId': _connectionManager.currentRoom?.id,
       'targetId': targetId,
@@ -680,21 +692,28 @@ class WebRTCService extends ChangeNotifier {
     }
   }
 
-  // --- latency over WS ------------------------------------------------------
+  // --- latency probe (lightweight /health timing) ---------------------------
 
   void _startLatencyTimer() {
     _latencyTimer?.cancel();
-    _latencyTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (_isWebSocketConnected) {
-        _lastPingSent = DateTime.now();
-        _sendWS({'type': 'ping'});
-      }
+    _probeLatency();
+    _latencyTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      if (_isWebSocketConnected && _appForeground) _probeLatency();
     });
   }
 
   void _stopLatencyTimer() {
     _latencyTimer?.cancel();
     _latencyTimer = null;
+  }
+
+  Future<void> _probeLatency() async {
+    try {
+      final sw = Stopwatch()..start();
+      final res = await http.get(Uri.parse('$_httpBase/health')).timeout(const Duration(seconds: 5));
+      sw.stop();
+      if (res.statusCode == 200) _connectionManager.updateLatency(sw.elapsedMilliseconds);
+    } catch (_) {}
   }
 
   // --- regain P2P after a relay fallback ------------------------------------

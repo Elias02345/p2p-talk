@@ -385,11 +385,24 @@ class AppLocalizationsDe extends AppLocalizations {
       'Aus Wiederherstellungsphrase wiederherstellen';
 
   @override
+  String get onbSkip => 'Ohne Account verwenden';
+
+  @override
+  String get onbLocalModeNote =>
+      'Ohne Account kannst du die App erkunden; Verbindungen mit Partnern brauchen einen Server.';
+
+  @override
+  String get settingsNoAccount => 'Noch kein Account';
+
+  @override
+  String get settingsCreateAccount => 'Account einrichten';
+
+  @override
   String get onbUsername => 'Benutzername';
 
   @override
   String get onbServerUrl =>
-      'Server-URL (z. B. ws://203.0.113.5:3000 oder wss://p2p-talk.example.com)';
+      'Server-URL (z. B. https://p2p-talk.example.com oder http://192.168.1.129:3000)';
 
   @override
   String get onbRecoveryTitle => 'Deine Wiederherstellungsphrase';

@@ -55,7 +55,7 @@ flutter build appbundle --release
 Release signing reads `android/key.properties` + the keystore (both gitignored —
 **never commit them**). On first launch the user creates an account (username +
 auto-generated recovery phrase) and enters the server URL, e.g.
-`wss://p2p-talk.example.com`.
+`https://p2p-talk.example.com` — or skips it to use the app without an account.
 
 ## 🖥️ Server — one-command install (Ubuntu/Debian)
 
@@ -72,7 +72,8 @@ The installer is idempotent: installs Docker, generates `JWT_SECRET` and
 the stack, and registers systemd units (including a 10-minute **auto-update** timer).
 
 **Behind cgNAT (no public IP)** — see [server/docs/DEPLOYMENT_CLOUDFLARE.md](server/docs/DEPLOYMENT_CLOUDFLARE.md).
-Cloudflare Tunnel / CloudGate carries the signaling (`wss://`); for the relay
+Cloudflare Tunnel / CloudGate carries the signaling over **HTTP long-poll**
+(`https://`, no WebSocket upgrade needed); for the relay
 fallback set `TURN_MODE=cloudflare` (Cloudflare managed TURN — works behind cgNAT,
 no public IP). Direct P2P calls work over STUN without any relay.
 
@@ -108,7 +109,7 @@ sudo bash doctor.sh --repair   # diagnose & repair
 
 ## 🔐 Security model
 
-- **Transport**: `wss://` / `https://` only; TLS terminated by CloudGate/proxy.
+- **Transport**: HTTP long-poll signaling over `https://` (or `http://` on a trusted LAN); TLS terminated by CloudGate/proxy.
 - **Accounts**: Ed25519 identity derived from a BIP39 seed; each device enrolls its
   own subkey authorized by the identity key. Auth is challenge–response (no passwords);
   the private key never leaves the device's secure storage. Lost devices are revocable.

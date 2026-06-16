@@ -232,6 +232,26 @@ async function run() {
     bobWs.close();
   });
 
+  await check('HTTP long-poll signaling relays between accounts', async () => {
+    // Alice polls (registers as an HTTP client + waiter); Bob sends to Alice.
+    const pollPromise = request('POST', '/api/rtc/poll', {}, alice.token);
+    await new Promise((r) => setTimeout(r, 250));
+    const send = await request('POST', '/api/rtc/send', {
+      type: 'signaling', targetId: alice.accountId, payload: { sdp: 'http-relay-x' },
+    }, bob.token);
+    assert.strictEqual(send.status, 200, `send: ${JSON.stringify(send.body)}`);
+    const poll = await Promise.race([
+      pollPromise,
+      new Promise((_, rej) => setTimeout(() => rej(new Error('poll timeout')), 5000)),
+    ]);
+    assert.strictEqual(poll.status, 200);
+    const msgs = poll.body.messages || [];
+    assert.ok(
+      msgs.some((m) => m.type === 'signaling' && m.from === bob.accountId),
+      `expected relayed signaling, got ${JSON.stringify(msgs)}`
+    );
+  });
+
   console.log(failures === 0 ? '\n--- ALL TESTS PASSED ---\n' : `\n--- ${failures} TEST(S) FAILED ---\n`);
   process.exit(failures === 0 ? 0 : 1);
 }

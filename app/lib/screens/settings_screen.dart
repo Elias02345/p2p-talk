@@ -10,6 +10,7 @@ import '../services/audio_manager.dart';
 import '../services/connection_manager.dart';
 import '../services/notification_service.dart';
 import '../services/account_service.dart';
+import 'onboarding_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -103,37 +104,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _card(t.settingsAccount, [
-              Text('${t.settingsUsername}: ${account.username ?? t.settingsLoading}',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              Text(t.settingsAccountId, style: const TextStyle(color: textGray, fontSize: 11)),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(10)),
-                      child: Text(account.accountId ?? t.settingsLoading,
-                          style: const TextStyle(
-                              color: neonCyan, fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.bold),
-                          overflow: TextOverflow.ellipsis),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    icon: const Icon(Icons.copy, color: neonCyan, size: 20),
-                    onPressed: () {
-                      if (account.accountId != null) {
-                        Clipboard.setData(ClipboardData(text: account.accountId!));
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t.settingsIdCopied)));
-                      }
-                    },
-                  ),
-                ],
-              ),
-            ]),
+            _card(t.settingsAccount, _accountChildren(account, t)),
             const SizedBox(height: 20),
 
             _card(t.settingsConfiguration, [
@@ -237,12 +208,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   : Text(t.settingsSave, style: const TextStyle(fontWeight: FontWeight.bold)),
             ),
             const SizedBox(height: 16),
-            Center(child: Text(t.settingsVersion('2.0.1'), style: const TextStyle(color: textGray, fontSize: 11))),
+            Center(child: Text(t.settingsVersion('2.0.2'), style: const TextStyle(color: textGray, fontSize: 11))),
             const SizedBox(height: 24),
           ],
         ),
       ),
     );
+  }
+
+  List<Widget> _accountChildren(AccountService account, AppLocalizations t) {
+    if (!account.isRegistered) {
+      return [
+        Text(t.settingsNoAccount, style: const TextStyle(color: Colors.white70, fontSize: 14)),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: neonCyan),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            icon: const Icon(Icons.person_add, color: neonCyan, size: 18),
+            label: Text(t.settingsCreateAccount, style: const TextStyle(color: neonCyan)),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+            ),
+          ),
+        ),
+      ];
+    }
+    return [
+      Text('${t.settingsUsername}: ${account.username ?? t.settingsLoading}',
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 12),
+      Text(t.settingsAccountId, style: const TextStyle(color: textGray, fontSize: 11)),
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(10)),
+              child: Text(account.accountId ?? t.settingsLoading,
+                  style: const TextStyle(
+                      color: neonCyan, fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis),
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.copy, color: neonCyan, size: 20),
+            onPressed: () {
+              if (account.accountId != null) {
+                Clipboard.setData(ClipboardData(text: account.accountId!));
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t.settingsIdCopied)));
+              }
+            },
+          ),
+        ],
+      ),
+    ];
   }
 
   Widget _languageSelector(AppLocalizations t) {

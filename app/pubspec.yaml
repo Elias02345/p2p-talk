@@ -1,7 +1,7 @@
 name: p2p_talk
 description: "p2p-talk — secure, hands-free P2P voice for the gym and motorcycle intercom. Talk through your headphones without losing music quality."
 publish_to: 'none'
-version: 2.0.1+4
+version: 2.0.2+5
 
 environment:
   sdk: ^3.12.1

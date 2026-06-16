@@ -20,7 +20,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   bool _busy = false;
   final _usernameController = TextEditingController();
   final _serverController =
-      TextEditingController(text: kDefaultServerUrl.isNotEmpty ? kDefaultServerUrl : 'ws://');
+      TextEditingController(text: kDefaultServerUrl.isNotEmpty ? kDefaultServerUrl : 'https://');
 
   static const neonCyan = Color(0xFF00E5FF);
   static const darkBg = Color(0xFF0F111A);
@@ -224,6 +224,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               onPressed: _busy ? null : _restoreAccount,
               child: Text(t.onbRestoreAccount, style: const TextStyle(color: textGray)),
             ),
+            const Divider(color: Colors.white12, height: 24),
+            TextButton(
+              onPressed: _busy ? null : _useWithoutAccount,
+              child: Text(t.onbSkip, style: const TextStyle(color: textGray)),
+            ),
+            Text(t.onbLocalModeNote,
+                textAlign: TextAlign.center, style: const TextStyle(color: textGray, fontSize: 11)),
           ],
         ),
       );
@@ -295,7 +302,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Future<bool> _prepare() async {
     final server = _serverController.text.trim();
-    if (server.isEmpty || server == 'wss://' || server == 'ws://') {
+    const placeholders = {'https://', 'http://', 'wss://', 'ws://'};
+    if (server.isEmpty || placeholders.contains(server)) {
       _snack(t.onbServerRequired);
       return false;
     }
@@ -412,8 +420,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   void _finish() {
     if (!mounted) return;
     final server = _serverController.text.trim();
+    // A real account supersedes any previous "local mode".
+    SharedPreferences.getInstance().then((p) => p.setBool(kPrefLocalMode, false));
     // Wire the transport to the chosen server (providers live above this screen).
     Provider.of<WebRTCService>(context, listen: false).init(server);
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const MainNavigationShell()),
+    );
+  }
+
+  Future<void> _useWithoutAccount() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(kPrefLocalMode, true);
+    if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const MainNavigationShell()),
     );

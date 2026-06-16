@@ -2,6 +2,20 @@
 
 All notable changes to p2p-talk are documented here.
 
+## [2.0.2] — 2026-06-16
+
+### Added / Changed
+- **HTTP long-poll signaling** (`POST /api/rtc/poll` + `/api/rtc/send`) replaces the
+  WebSocket transport on the client, so signaling traverses CloudGate / any
+  HTTP-only Cloudflare Tunnel (no `ws://` upgrade required). The WebSocket server
+  endpoint is retained for compatibility; both share one routing path.
+- App connects over `https://<host>` (or `http://<ip>:<port>` on a LAN).
+- **Use without an account**: onboarding now offers a local mode so the app opens
+  without a server; account-dependent features are disabled until you set one up
+  (Settings → Set up account).
+- Clarified installer/docs: `--public-host` is a hostname (CloudGate maps it to
+  `http://<server-ip>:<port>`), not a "CloudGate IP".
+
 ## [2.0.1] — 2026-06-15
 
 ### Added / Changed

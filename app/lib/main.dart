@@ -22,10 +22,11 @@ import 'screens/onboarding_screen.dart';
 
 const kPrefServerUrl = 'p2ptalk_server_url';
 const kPrefIntercomMode = 'p2ptalk_intercom_mode';
+const kPrefLocalMode = 'p2ptalk_local_mode'; // app used without an account/server
 
 /// Optional build-time default so a released APK ships preconfigured and works
 /// standalone without the user typing a server URL:
-///   flutter build apk --release --dart-define=DEFAULT_SERVER_URL=wss://p2p-talk.example.com
+///   flutter build apk --release --dart-define=DEFAULT_SERVER_URL=https://p2p-talk.example.com
 const kDefaultServerUrl = String.fromEnvironment('DEFAULT_SERVER_URL', defaultValue: '');
 
 /// One-time migration of legacy GymTalk preference keys to the new namespace.
@@ -64,11 +65,14 @@ Future<void> main() async {
   final localeProvider = LocaleProvider();
   await localeProvider.load();
 
+  final localMode = prefs.getBool(kPrefLocalMode) ?? false;
+
   runApp(P2PTalkApp(
     account: account,
     localeProvider: localeProvider,
     serverUrl: serverUrl,
     isIntercomMode: isIntercomMode,
+    localMode: localMode,
   ));
 }
 
@@ -77,6 +81,7 @@ class P2PTalkApp extends StatelessWidget {
   final LocaleProvider localeProvider;
   final String serverUrl;
   final bool isIntercomMode;
+  final bool localMode;
 
   const P2PTalkApp({
     super.key,
@@ -84,6 +89,7 @@ class P2PTalkApp extends StatelessWidget {
     required this.localeProvider,
     required this.serverUrl,
     required this.isIntercomMode,
+    required this.localMode,
   });
 
   @override
@@ -150,7 +156,9 @@ class P2PTalkApp extends StatelessWidget {
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           theme: _theme(),
-          home: account.isRegistered ? const MainNavigationShell() : const OnboardingScreen(),
+          home: (account.isRegistered || localMode)
+              ? const MainNavigationShell()
+              : const OnboardingScreen(),
         ),
       ),
     );

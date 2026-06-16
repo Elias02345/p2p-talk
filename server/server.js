@@ -19,7 +19,7 @@ const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 const WS_HEARTBEAT_INTERVAL = parseInt(process.env.WS_HEARTBEAT_INTERVAL, 10) || 30000;
-const SERVER_VERSION = '2.0.1';
+const SERVER_VERSION = '2.0.2';
 
 const startTime = Date.now();
 
@@ -66,6 +66,12 @@ const accountSockets = new Map();
 // roomId -> Set<accountId>
 const rooms = new Map();
 
+// HTTP long-poll signaling clients — for transports that cannot upgrade to a
+// WebSocket (e.g. a Cloudflare Tunnel / CloudGate that only carries HTTP).
+// accountId -> { device, queue:[], waiter:{res,timer}|null, lastSeen }
+const httpClients = new Map();
+const HTTP_PRESENCE_TTL = parseInt(process.env.HTTP_PRESENCE_TTL_MS, 10) || 35000;
+
 function registerSocket(ws, accountId, device) {
   sockets.set(ws, { accountId, device });
   if (!accountSockets.has(accountId)) accountSockets.set(accountId, new Set());
@@ -84,9 +90,27 @@ function unregisterSocket(ws) {
   return meta;
 }
 
+/** Queue a message for an account's HTTP long-poll client, if one exists. */
+function enqueueHttp(accountId, payload) {
+  const c = httpClients.get(accountId);
+  if (!c) return false;
+  c.queue.push(payload);
+  if (c.waiter) {
+    const { res, timer } = c.waiter;
+    clearTimeout(timer);
+    c.waiter = null;
+    const msgs = c.queue;
+    c.queue = [];
+    try { res.json({ messages: msgs }); } catch { /* client gone */ }
+  }
+  return true;
+}
+
 function isOnline(accountId) {
   const set = accountSockets.get(accountId);
-  return !!set && set.size > 0;
+  if (set && set.size > 0) return true;
+  const c = httpClients.get(accountId);
+  return !!c && Date.now() - c.lastSeen < HTTP_PRESENCE_TTL;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,14 +143,16 @@ function sendWS(ws, payload) {
   return false;
 }
 
-/** Send a payload to every online device (socket) of an account. */
+/** Deliver a payload to every online transport (WS sockets + HTTP poller). */
 function sendToAccount(accountId, payload, exceptWs = null) {
-  const set = accountSockets.get(accountId);
-  if (!set) return false;
   let sent = false;
-  for (const ws of set) {
-    if (ws !== exceptWs) sent = sendWS(ws, payload) || sent;
+  const set = accountSockets.get(accountId);
+  if (set) {
+    for (const ws of set) {
+      if (ws !== exceptWs) sent = sendWS(ws, payload) || sent;
+    }
   }
+  if (enqueueHttp(accountId, payload)) sent = true;
   return sent;
 }
 
@@ -170,6 +196,86 @@ function removeFromAllRooms(accountId) {
       broadcastToRoom(roomId, accountId, { type: 'room_member_left', roomId, userId: accountId });
       if (members.size === 0) rooms.delete(roomId);
     }
+  }
+}
+
+/**
+ * Route a client signaling message. Works for both transports (WebSocket and
+ * HTTP long-poll). `reply` delivers a message back to the sender.
+ */
+async function handleClientMessage(accountId, device, msg, reply) {
+  switch (msg.type) {
+    case 'signaling':
+      if (msg.targetId) {
+        sendToAccount(msg.targetId, {
+          type: 'signaling', from: accountId, fromDevice: device, payload: msg.payload,
+        });
+      }
+      break;
+
+    case 'call_request':
+      if (msg.targetId) {
+        const delivered = sendToAccount(msg.targetId, {
+          type: 'call_request', from: accountId, fromDevice: device, autoConnect: msg.autoConnect || false,
+        });
+        if (!delivered) reply({ type: 'error', message: 'Target offline' });
+      }
+      break;
+
+    case 'call_response':
+      if (msg.targetId) {
+        sendToAccount(msg.targetId, {
+          type: 'call_response', from: accountId, fromDevice: device, accepted: msg.accepted,
+        });
+      }
+      break;
+
+    case 'join_room': {
+      const { roomId } = msg;
+      if (!roomId) break;
+      if (!rooms.has(roomId)) rooms.set(roomId, new Set());
+      const room = rooms.get(roomId);
+      room.add(accountId);
+      await db.run(
+        'INSERT OR IGNORE INTO room_members (room_id, user_id, joined_at) VALUES (?, ?, ?)',
+        [roomId, accountId, Date.now()]
+      );
+      reply({ type: 'room_joined', roomId, members: Array.from(room) });
+      broadcastToRoom(roomId, accountId, {
+        type: 'room_member_joined', roomId, userId: accountId, username: msg.username || null,
+      });
+      break;
+    }
+
+    case 'leave_room': {
+      const { roomId } = msg;
+      if (!roomId) break;
+      const room = rooms.get(roomId);
+      if (room) {
+        room.delete(accountId);
+        await db.run('DELETE FROM room_members WHERE room_id = ? AND user_id = ?', [roomId, accountId]);
+        broadcastToRoom(roomId, accountId, { type: 'room_member_left', roomId, userId: accountId });
+        if (room.size === 0) rooms.delete(roomId);
+      }
+      reply({ type: 'room_left', roomId });
+      break;
+    }
+
+    case 'room_signaling': {
+      const { roomId, targetId, payload } = msg;
+      if (!roomId) break;
+      const out = { type: 'room_signaling', roomId, from: accountId, fromDevice: device, payload };
+      if (targetId) sendToAccount(targetId, out);
+      else broadcastToRoom(roomId, accountId, out);
+      break;
+    }
+
+    case 'ping':
+      reply({ type: 'pong' });
+      break;
+
+    default:
+      break;
   }
 }
 
@@ -619,6 +725,96 @@ app.post('/api/rooms', auth.requireAuth, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// HTTP SIGNALING (long-poll) — for CloudGate / plain HTTP without WebSockets
+// ---------------------------------------------------------------------------
+
+// Long-poll: holds the request until a message is queued (or ~25s), then returns
+// { messages: [...] }. The client re-polls immediately.
+app.post('/api/rtc/poll', auth.requireAuth, (req, res) => {
+  const accountId = req.account.id;
+  const device = req.account.device;
+  const wasOnline = isOnline(accountId);
+
+  let c = httpClients.get(accountId);
+  if (!c) {
+    c = { device, queue: [], waiter: null, lastSeen: 0 };
+    httpClients.set(accountId, c);
+  }
+  c.device = device;
+  c.lastSeen = Date.now();
+
+  if (!wasOnline) {
+    db.run('UPDATE users SET last_seen = ? WHERE id = ?', [Date.now(), accountId]).catch(() => {});
+    db.run(
+      'UPDATE account_devices SET last_seen = ? WHERE account_id = ? AND device_public_key = ?',
+      [Date.now(), accountId, device]
+    ).catch(() => {});
+    notifyContactsStatus(accountId, 'online');
+  }
+
+  // Replace any previous waiter (e.g. duplicate poll).
+  if (c.waiter) {
+    clearTimeout(c.waiter.timer);
+    try { c.waiter.res.json({ messages: [] }); } catch { /* gone */ }
+    c.waiter = null;
+  }
+  if (c.queue.length) {
+    const msgs = c.queue;
+    c.queue = [];
+    return res.json({ messages: msgs });
+  }
+  const timer = setTimeout(() => {
+    if (c.waiter && c.waiter.res === res) {
+      c.waiter = null;
+      res.json({ messages: [] });
+    }
+  }, 25000);
+  c.waiter = { res, timer };
+  req.on('close', () => {
+    if (c.waiter && c.waiter.res === res) {
+      clearTimeout(c.waiter.timer);
+      c.waiter = null;
+    }
+  });
+});
+
+// Send a signaling message over HTTP (same routing as WebSocket).
+app.post('/api/rtc/send', auth.requireAuth, async (req, res) => {
+  try {
+    const c = httpClients.get(req.account.id);
+    if (c) c.lastSeen = Date.now();
+    await handleClientMessage(
+      req.account.id,
+      req.account.device,
+      req.body || {},
+      (payload) => enqueueHttp(req.account.id, payload)
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('[API] rtc/send error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Best-effort explicit disconnect (presence also times out on its own).
+app.post('/api/rtc/disconnect', auth.requireAuth, (req, res) => {
+  const accountId = req.account.id;
+  const c = httpClients.get(accountId);
+  if (c) {
+    if (c.waiter) {
+      clearTimeout(c.waiter.timer);
+      try { c.waiter.res.json({ messages: [] }); } catch { /* gone */ }
+    }
+    httpClients.delete(accountId);
+    if (!isOnline(accountId)) {
+      removeFromAllRooms(accountId);
+      notifyContactsStatus(accountId, 'offline');
+    }
+  }
+  res.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
 // WEBSOCKET SIGNALING & PRESENCE
 // ---------------------------------------------------------------------------
 
@@ -663,97 +859,9 @@ wss.on('connection', (ws) => {
           break;
         }
 
-        // WebRTC signaling relay (account-addressed). Payload (SDP/ICE, signed
-        // fingerprints) is opaque to the server.
-        case 'signaling': {
-          if (!msg.targetId) break;
-          sendToAccount(msg.targetId, {
-            type: 'signaling',
-            from: meta.accountId,
-            fromDevice: meta.device,
-            payload: msg.payload,
-          });
-          break;
-        }
-
-        case 'call_request': {
-          if (!msg.targetId) break;
-          const delivered = sendToAccount(msg.targetId, {
-            type: 'call_request',
-            from: meta.accountId,
-            fromDevice: meta.device,
-            autoConnect: msg.autoConnect || false,
-          });
-          if (!delivered) sendWS(ws, { type: 'error', message: 'Target offline' });
-          break;
-        }
-
-        case 'call_response': {
-          if (!msg.targetId) break;
-          sendToAccount(msg.targetId, {
-            type: 'call_response',
-            from: meta.accountId,
-            fromDevice: meta.device,
-            accepted: msg.accepted,
-          });
-          break;
-        }
-
-        case 'join_room': {
-          const { roomId } = msg;
-          if (!roomId) break;
-          if (!rooms.has(roomId)) rooms.set(roomId, new Set());
-          const room = rooms.get(roomId);
-          room.add(meta.accountId);
-          await db.run(
-            'INSERT OR IGNORE INTO room_members (room_id, user_id, joined_at) VALUES (?, ?, ?)',
-            [roomId, meta.accountId, Date.now()]
-          );
-          sendWS(ws, { type: 'room_joined', roomId, members: Array.from(room) });
-          broadcastToRoom(roomId, meta.accountId, {
-            type: 'room_member_joined',
-            roomId,
-            userId: meta.accountId,
-            username: msg.username || null,
-          });
-          break;
-        }
-
-        case 'leave_room': {
-          const { roomId } = msg;
-          if (!roomId) break;
-          const room = rooms.get(roomId);
-          if (room) {
-            room.delete(meta.accountId);
-            await db.run('DELETE FROM room_members WHERE room_id = ? AND user_id = ?', [
-              roomId,
-              meta.accountId,
-            ]);
-            broadcastToRoom(roomId, meta.accountId, {
-              type: 'room_member_left',
-              roomId,
-              userId: meta.accountId,
-            });
-            if (room.size === 0) rooms.delete(roomId);
-          }
-          sendWS(ws, { type: 'room_left', roomId });
-          break;
-        }
-
-        case 'room_signaling': {
-          const { roomId, targetId, payload } = msg;
-          if (!roomId) break;
-          const out = { type: 'room_signaling', roomId, from: meta.accountId, fromDevice: meta.device, payload };
-          if (targetId) sendToAccount(targetId, out);
-          else broadcastToRoom(roomId, meta.accountId, out);
-          break;
-        }
-
-        case 'ping':
-          sendWS(ws, { type: 'pong' });
-          break;
-
         default:
+          // All signaling/room/call routing is shared with the HTTP transport.
+          await handleClientMessage(meta.accountId, meta.device, msg, (payload) => sendWS(ws, payload));
           break;
       }
     } catch (err) {
@@ -781,6 +889,25 @@ const heartbeatInterval = setInterval(() => {
   });
 }, WS_HEARTBEAT_INTERVAL);
 wss.on('close', () => clearInterval(heartbeatInterval));
+
+// HTTP long-poll presence sweeper — mark stale HTTP clients offline.
+const httpSweeper = setInterval(() => {
+  const now = Date.now();
+  for (const [accountId, c] of httpClients.entries()) {
+    if (now - c.lastSeen > HTTP_PRESENCE_TTL) {
+      if (c.waiter) {
+        clearTimeout(c.waiter.timer);
+        try { c.waiter.res.json({ messages: [] }); } catch { /* gone */ }
+      }
+      httpClients.delete(accountId);
+      if (!isOnline(accountId)) {
+        removeFromAllRooms(accountId);
+        notifyContactsStatus(accountId, 'offline');
+      }
+    }
+  }
+}, 15000);
+if (httpSweeper.unref) httpSweeper.unref();
 
 // ---------------------------------------------------------------------------
 // Graceful shutdown

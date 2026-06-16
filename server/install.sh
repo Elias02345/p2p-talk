@@ -172,8 +172,9 @@ echo "      hostname:  ${PUBLIC_HOST:-p2p-talk.<your-domain>}"
 echo "      service :  http://${SERVER_IP}:${PORT_VAL}"
 echo
 echo "  Then enter in the app onboarding:"
-echo "      wss://${PUBLIC_HOST:-p2p-talk.<your-domain>}"
-echo "  (CloudGate / Cloudflare provides TLS automatically — no port, no cert.)"
+echo "      https://${PUBLIC_HOST:-p2p-talk.<your-domain>}"
+echo "  (Signaling now runs over plain HTTP long-poll — works through CloudGate;"
+echo "   CloudGate / Cloudflare provides TLS automatically, no port, no cert.)"
 echo
 echo "  Relay mode: ${TURN_MODE_VAL}"
 if [[ "${TURN_MODE_VAL}" == "coturn" ]]; then
