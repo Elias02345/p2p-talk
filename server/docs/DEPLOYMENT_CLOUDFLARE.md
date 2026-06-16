@@ -21,16 +21,25 @@ guaranteed fallback for strict/symmetric NAT.
 
 ## 1. Signaling — Cloudflare Tunnel
 
-### Option A — CloudGate VM forwards IP:port over plain HTTP (your setup)
-CloudGate runs on its own VM and forwards a public IP:port to this server.
-1. `sudo PUBLIC_HOST=<cloudgate-ip> bash install.sh` — the signaling server listens
-   on `0.0.0.0:3000` (set `SIGNALING_BIND` to change), reachable from the CloudGate VM.
-2. In CloudGate, forward `<cloudgate-ip>:3000` → `<this-server-ip>:3000` (plain HTTP).
-3. App onboarding: `ws://<cloudgate-ip>:3000`.
+### Option A — CloudGate / Cloudflare Tunnel (your setup)
+CloudGate (a Cloudflare Tunnel manager) publishes this server under a **hostname
+with HTTPS**. You do **not** expose a raw IP:port to the internet, and the app
+does **not** use a "CloudGate IP" — it uses your hostname.
 
-> ws:// is **unencrypted on the wire**. The media stays end-to-end encrypted
-> (DTLS-SRTP) and calls are MitM-protected by the signed-fingerprint chain, but
-> for token privacy prefer `wss://` via a domain when you can (Option B).
+1. On the server box:
+   ```bash
+   sudo bash install.sh --public-host p2p-talk.<your-domain>
+   ```
+   The signaling server listens on `0.0.0.0:3000` (override with `--bind`), i.e. it
+   is reachable on your LAN at `http://<server-ip>:3000`.
+2. In CloudGate, add a service: **hostname** `p2p-talk.<your-domain>` →
+   **service** `http://<server-ip>:3000` (e.g. `http://192.168.1.129:3000`).
+3. App onboarding: **`wss://p2p-talk.<your-domain>`** — Cloudflare provides TLS
+   automatically, so no port and no certificate are needed.
+
+> `PUBLIC_HOST` is your **hostname**, never an IP. The server binding to
+> `0.0.0.0` is only so the CloudGate VM can reach it on the LAN. On the same LAN
+> you can also test directly with `ws://<server-ip>:3000` (cleartext is allowed).
 
 ### Option B — bundled cloudflared
 1. Create a tunnel in the Cloudflare dashboard, copy the **tunnel token**, and map

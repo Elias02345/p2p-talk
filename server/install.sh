@@ -2,11 +2,16 @@
 # ---------------------------------------------------------------------------
 # p2p-talk — one-shot installer.
 # Takes a fresh Ubuntu/Debian machine from zero to a running signaling + TURN
-# stack. Idempotent: safe to re-run.
+# stack. Idempotent: safe to re-run. Everything is optional.
 #
-#   sudo bash install.sh                 # Standard / CloudGate mode (default)
-#   sudo NETWORK_MODE=hostnet bash install.sh
-#   sudo PUBLIC_HOST=p2p-talk.example.com bash install.sh
+#   sudo bash install.sh
+#   sudo bash install.sh --public-host p2p-talk.example.com
+#   sudo bash install.sh --public-host p2p-talk.example.com --turn-mode cloudflare \
+#        --cf-turn-key-id <id> --cf-turn-api-token <token>
+#
+# --public-host is the hostname the APP connects to (e.g. via CloudGate/Cloudflare
+# Tunnel, which gives you https/wss for free). In CloudGate you map that hostname
+# to this server's http://<server-ip>:<PORT>. It is NOT a "CloudGate IP".
 # ---------------------------------------------------------------------------
 set -Eeuo pipefail
 
@@ -17,9 +22,38 @@ SERVER_DIR="${SCRIPT_DIR}"
 DOCKER_DIR="${SERVER_DIR}/docker"
 ENV_FILE="${SERVER_DIR}/.env"
 ENV_EXAMPLE="${SERVER_DIR}/.env.example"
+# Defaults (overridable by flags or environment).
 NETWORK_MODE="${NETWORK_MODE:-main}"   # main | hostnet
 PUBLIC_HOST="${PUBLIC_HOST:-}"
 SERVICE_NAME="p2ptalk-signaling"
+
+# --- CLI flags (robust through sudo; all optional) -------------------------
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --public-host)       PUBLIC_HOST="$2"; shift 2 ;;
+    --network-mode)      NETWORK_MODE="$2"; shift 2 ;;
+    --bind)              SIGNALING_BIND="$2"; shift 2 ;;
+    --turn-mode)         TURN_MODE="$2"; shift 2 ;;
+    --cf-turn-key-id)    CF_TURN_KEY_ID="$2"; shift 2 ;;
+    --cf-turn-api-token) CF_TURN_API_TOKEN="$2"; shift 2 ;;
+    --tunnel-token)      TUNNEL_TOKEN="$2"; shift 2 ;;
+    -h|--help)
+      cat <<'USAGE'
+Usage: sudo bash install.sh [options]   (all optional)
+  --public-host <host>      Hostname the app connects to, e.g. p2p-talk.example.com
+                            (in CloudGate you map it to http://<server-ip>:<port>)
+  --network-mode <mode>     main (default) | hostnet
+  --bind <addr>             Interface to publish the signaling port on (default 0.0.0.0)
+  --turn-mode <mode>        coturn | cloudflare | static | none
+  --cf-turn-key-id <id>     Cloudflare TURN key id   (with --turn-mode cloudflare)
+  --cf-turn-api-token <t>   Cloudflare TURN API token
+  --tunnel-token <token>    Bundled cloudflared tunnel token (optional)
+Re-running is safe and preserves existing secrets.
+USAGE
+      exit 0 ;;
+    *) warn "Unknown option: $1"; shift ;;
+  esac
+done
 
 require_root
 banner "p2p-talk installer"
@@ -58,7 +92,8 @@ if [[ -n "${PUBLIC_HOST}" ]]; then
   set_env_value "${ENV_FILE}" TURN_HOST "${PUBLIC_HOST}"
 fi
 
-# Optional relay/tunnel settings passed via environment (preserved on re-run).
+# Optional relay/tunnel settings (flags or environment; preserved on re-run).
+[[ -n "${SIGNALING_BIND:-}" ]]    && set_env_value "${ENV_FILE}" SIGNALING_BIND "${SIGNALING_BIND}"
 [[ -n "${TURN_MODE:-}" ]]         && set_env_value "${ENV_FILE}" TURN_MODE "${TURN_MODE}"
 [[ -n "${CF_TURN_KEY_ID:-}" ]]    && set_env_value "${ENV_FILE}" CF_TURN_KEY_ID "${CF_TURN_KEY_ID}"
 [[ -n "${CF_TURN_API_TOKEN:-}" ]] && set_env_value "${ENV_FILE}" CF_TURN_API_TOKEN "${CF_TURN_API_TOKEN}"
@@ -128,15 +163,21 @@ else
   warn "Health check did not pass yet — check: journalctl -u ${SERVICE_NAME} -n 100"
 fi
 SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || echo '<server-ip>')"
+TURN_MODE_VAL="$(grep -m1 '^TURN_MODE=' "${ENV_FILE}" | cut -d= -f2 || echo coturn)"
 echo
-echo "  Signaling listens on:  http://${SERVER_IP}:${PORT_VAL}  (health: /health)"
-echo "  App server URL:        ws://${PUBLIC_HOST:-<cloudgate-ip>}:${PORT_VAL}"
-echo "  Relay mode:            $(grep -m1 '^TURN_MODE=' "${ENV_FILE}" | cut -d= -f2 || echo coturn)"
+echo "  This server listens on:  http://${SERVER_IP}:${PORT_VAL}   (health: /health)"
 echo
-echo "  CloudGate: point it at this server -> ${SERVER_IP}:${PORT_VAL} (plain HTTP)."
-echo "  Then enter in the app onboarding:    ws://${PUBLIC_HOST:-<cloudgate-ip>}:${PORT_VAL}"
+echo "  In CloudGate, publish a hostname for THIS service:"
+echo "      hostname:  ${PUBLIC_HOST:-p2p-talk.<your-domain>}"
+echo "      service :  http://${SERVER_IP}:${PORT_VAL}"
 echo
-echo "  NOTE: plain ws:// is unencrypted on the wire. Media stays end-to-end"
-echo "  encrypted (DTLS-SRTP) and calls are MitM-protected, but for token privacy"
-echo "  prefer wss:// via a domain when possible (set PUBLIC_HOST + TLS at CloudGate)."
+echo "  Then enter in the app onboarding:"
+echo "      wss://${PUBLIC_HOST:-p2p-talk.<your-domain>}"
+echo "  (CloudGate / Cloudflare provides TLS automatically — no port, no cert.)"
+echo
+echo "  Relay mode: ${TURN_MODE_VAL}"
+if [[ "${TURN_MODE_VAL}" == "coturn" ]]; then
+  echo "  NOTE: self-hosted coturn is NOT reachable through a Cloudflare Tunnel."
+  echo "        Behind CloudGate use --turn-mode cloudflare (managed TURN) or none."
+fi
 echo

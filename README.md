@@ -64,7 +64,7 @@ Deployed headless behind **CloudGate** (cgNAT tunnel). No public IP required.
 ```bash
 git clone https://github.com/Elias02345/p2p-talk.git
 cd p2p-talk/server
-sudo PUBLIC_HOST=p2p-talk.example.com bash install.sh
+sudo bash install.sh --public-host p2p-talk.example.com
 ```
 
 The installer is idempotent: installs Docker, generates `JWT_SECRET` and
@@ -78,8 +78,8 @@ no public IP). Direct P2P calls work over STUN without any relay.
 
 ```bash
 # cgNAT box, signaling via CloudGate + Cloudflare managed TURN:
-sudo TURN_MODE=cloudflare CF_TURN_KEY_ID=... CF_TURN_API_TOKEN=... \
-     PUBLIC_HOST=p2p-talk.example.com bash install.sh
+sudo bash install.sh --public-host p2p-talk.example.com \
+     --turn-mode cloudflare --cf-turn-key-id <id> --cf-turn-api-token <token>
 ```
 
 Operations:
