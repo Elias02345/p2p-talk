@@ -212,7 +212,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   : Text(t.settingsSave, style: const TextStyle(fontWeight: FontWeight.bold)),
             ),
             const SizedBox(height: 16),
-            Center(child: Text(t.settingsVersion('2.1.0'), style: const TextStyle(color: textGray, fontSize: 11))),
+            Center(child: Text(t.settingsVersion('2.2.0'), style: const TextStyle(color: textGray, fontSize: 11))),
             const SizedBox(height: 24),
           ],
         ),

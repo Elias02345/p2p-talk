@@ -7,6 +7,8 @@ build/
 *.apk
 *.aab
 *.ipa
+build-apk.log
+build-aab.log
 
 # IDE
 .idea/

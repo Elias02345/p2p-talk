@@ -5,6 +5,7 @@ import '../services/webrtc_service.dart';
 import '../services/ble_service.dart';
 import '../services/geofence_service.dart';
 import '../services/account_service.dart';
+import 'pairing_screen.dart';
 
 class ContactsScreen extends StatefulWidget {
   const ContactsScreen({super.key});
@@ -109,6 +110,13 @@ class _ContactsScreenState extends State<ContactsScreen> {
         elevation: 0,
         title: Text(t.contactsTitle, style: const TextStyle(fontWeight: FontWeight.bold)),
         actions: [
+          IconButton(
+            tooltip: t.pairTitle,
+            icon: const Icon(Icons.qr_code_2, color: neonCyan),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const PairingScreen()),
+            ),
+          ),
           IconButton(
             icon: _isLoading
                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: neonCyan))

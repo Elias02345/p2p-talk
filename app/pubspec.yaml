@@ -1,7 +1,7 @@
 name: p2p_talk
 description: "p2p-talk — secure, hands-free P2P voice for the gym and motorcycle intercom. Talk through your headphones without losing music quality."
 publish_to: 'none'
-version: 2.1.0+6
+version: 2.2.0+7
 
 environment:
   sdk: ^3.12.1
@@ -38,8 +38,10 @@ dependencies:
   cryptography: ^2.7.0
   bip39: ^1.0.6
   flutter_secure_storage: ^10.3.1
-  # Serverless local discovery — BLE advertising so nearby phones find each other.
-  flutter_ble_peripheral: ^1.2.6
+  # Serverless local discovery + pairing
+  flutter_ble_peripheral: ^1.2.6   # BLE advertising so nearby phones find each other
+  mobile_scanner: ^5.2.3           # QR scanning for serverless pairing
+  qr_flutter: ^4.1.0               # QR display for serverless pairing
 
 dev_dependencies:
   flutter_test:

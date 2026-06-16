@@ -14,6 +14,7 @@ self-hosted relay **seamlessly** — and the app keeps trying to restore P2P.
 - **🎧 No music-quality loss** — voice is mixed into the A2DP **media** stream (Android stays in `MODE_NORMAL`, no HFP/SCO). Gym mode captures via the phone mic; intercom mode uses full helmet SCO.
 - **📱 Not a call** — no ringing, no accept dialog; known-partner channels open automatically.
 - **🔁 Seamless relay fallback** — ICE prefers direct P2P; falls back to TURN relay only when needed, and auto-restarts ICE to regain P2P. The user never notices the switch.
+- **📷 Serverless QR pairing** — two phones can connect with **no server and no network at all**: one shows an invite QR, the other scans it and shows a response QR back. The full WebRTC offer/answer (with ICE candidates inline) is exchanged in the codes, and the signed fingerprint chain is verified **offline** — still MitM-safe.
 - **🔒 End-to-end encrypted** — DTLS-SRTP; the relay only forwards ciphertext. Account auth is a device-held Ed25519 key (no passwords); peers verify each other cryptographically (anti-MitM).
 - **🌍 Bilingual** — English / Deutsch, switchable in-app.
 - **👥 Group rooms**, **📍 gym geofencing**, **🔋 battery/data efficient** (Opus DTX, WS-ping latency, tuned GPS/BLE).

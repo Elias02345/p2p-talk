@@ -463,6 +463,45 @@ class AppLocalizationsDe extends AppLocalizations {
       'Account konnte nicht wiederhergestellt werden. Prüfe Phrase und Server-URL.';
 
   @override
+  String get pairTitle => 'In der Nähe koppeln (ohne Server)';
+
+  @override
+  String get pairIntro =>
+      'Zwei Handys direkt verbinden, ohne Server. Ein Handy zeigt einen Einladungscode; das andere scannt ihn und zeigt dann einen Antwortcode zurück.';
+
+  @override
+  String get pairShowInvite => 'Einladungscode zeigen';
+
+  @override
+  String get pairScanInvite => 'Code scannen';
+
+  @override
+  String get pairScanResponse => 'Antwort des Partners scannen';
+
+  @override
+  String get pairShowResponse => 'Zeige diese Antwort deinem Partner';
+
+  @override
+  String get pairPointCamera => 'Auf den Code des anderen Handys richten';
+
+  @override
+  String get pairConnecting => 'Gekoppelt — verbinde…';
+
+  @override
+  String get pairConnected => 'Verbunden!';
+
+  @override
+  String get pairInvalid =>
+      'Ungültiger oder nicht verifizierter Code — erneut versuchen';
+
+  @override
+  String get pairTooLarge =>
+      'Code konnte nicht erstellt werden. Stelle sicher, dass beide Handys im selben WLAN sind, und versuche es erneut.';
+
+  @override
+  String get pairCameraDenied => 'Kamerazugriff wird zum Scannen benötigt';
+
+  @override
   String get contactsTitle => 'Partner';
 
   @override

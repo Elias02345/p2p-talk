@@ -458,6 +458,44 @@ class AppLocalizationsEn extends AppLocalizations {
       'Could not restore the account. Check the phrase and server URL.';
 
   @override
+  String get pairTitle => 'Pair nearby (no server)';
+
+  @override
+  String get pairIntro =>
+      'Connect two phones directly, with no server. One phone shows an invite code; the other scans it, then shows a response code back.';
+
+  @override
+  String get pairShowInvite => 'Show invite code';
+
+  @override
+  String get pairScanInvite => 'Scan a code';
+
+  @override
+  String get pairScanResponse => 'Scan partner\'s response';
+
+  @override
+  String get pairShowResponse => 'Show this response to your partner';
+
+  @override
+  String get pairPointCamera => 'Point at the other phone\'s code';
+
+  @override
+  String get pairConnecting => 'Paired — connecting…';
+
+  @override
+  String get pairConnected => 'Connected!';
+
+  @override
+  String get pairInvalid => 'Invalid or unverified code — try again';
+
+  @override
+  String get pairTooLarge =>
+      'Could not encode the code. Make sure both phones are on the same Wi-Fi and retry.';
+
+  @override
+  String get pairCameraDenied => 'Camera permission is needed to scan codes';
+
+  @override
   String get contactsTitle => 'Partners';
 
   @override

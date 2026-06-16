@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show gzip;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:http/http.dart' as http;
@@ -48,6 +49,10 @@ class WebRTCService extends ChangeNotifier {
   // Per-peer ICE-restart backoff bookkeeping
   final Map<String, int> _relayRestartCount = {};
   final Map<String, DateTime> _lastRelayRestart = {};
+
+  // Non-trickle pairing: per-peer ICE-gathering completer + collected candidates
+  final Map<String, Completer<void>> _iceGatherComplete = {};
+  final Map<String, List<RTCIceCandidate>> _pairingCandidates = {};
 
   // Fallback STUN config if /api/ice is unreachable.
   static const Map<String, dynamic> _fallbackIce = {
@@ -378,6 +383,8 @@ class WebRTCService extends ChangeNotifier {
     _isInitiatorFor.remove(peerId);
     _relayRestartCount.remove(peerId);
     _lastRelayRestart.remove(peerId);
+    _iceGatherComplete.remove(peerId);
+    _pairingCandidates.remove(peerId);
   }
 
   // --- ICE configuration ----------------------------------------------------
@@ -469,6 +476,37 @@ class WebRTCService extends ChangeNotifier {
     _enableLocalAudio(false);
   }
 
+  /// Shared peer-connection wiring (connection-state + remote track handling),
+  /// used by both server-signaled calls and serverless (QR/LAN) pairing.
+  void _wirePeerCommon(String partnerId, RTCPeerConnection pc) {
+    pc.onConnectionState = (state) {
+      log('PC state ($partnerId): $state');
+      if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _connectionState = P2PConnectionState.connected;
+        _connectionManager.setPeerConnected(partnerId, true);
+        // Mic stays muted until VAD detects speech.
+        _startIceMonitor();
+        notifyListeners();
+      } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
+          state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
+          state == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
+        _connectionManager.setPeerConnected(partnerId, false);
+        _disconnectPeer(partnerId);
+        if (_peerConnections.isEmpty) {
+          _connectionState = P2PConnectionState.disconnected;
+          _stopIceMonitor();
+          notifyListeners();
+        }
+      }
+    };
+    pc.onTrack = (event) {
+      if (event.streams.isNotEmpty) {
+        _remoteStreams[partnerId] = event.streams[0];
+        log('Remote track from $partnerId.');
+      }
+    };
+  }
+
   Future<void> _startCallSession(String partnerId, {required bool isInitiator}) async {
     try {
       _isInitiatorFor[partnerId] = isInitiator;
@@ -476,26 +514,7 @@ class WebRTCService extends ChangeNotifier {
       final pc = await createPeerConnection(config);
       _peerConnections[partnerId] = pc;
 
-      pc.onConnectionState = (state) {
-        log('PC state ($partnerId): $state');
-        if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
-          _connectionState = P2PConnectionState.connected;
-          _connectionManager.setPeerConnected(partnerId, true);
-          // Mic stays muted until VAD detects speech.
-          _startIceMonitor();
-          notifyListeners();
-        } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
-            state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
-            state == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
-          _connectionManager.setPeerConnected(partnerId, false);
-          _disconnectPeer(partnerId);
-          if (_peerConnections.isEmpty) {
-            _connectionState = P2PConnectionState.disconnected;
-            _stopIceMonitor();
-            notifyListeners();
-          }
-        }
-      };
+      _wirePeerCommon(partnerId, pc);
 
       pc.onIceCandidate = (candidate) {
         _sendSignaling(partnerId, {
@@ -505,13 +524,6 @@ class WebRTCService extends ChangeNotifier {
             'sdpMLineIndex': candidate.sdpMLineIndex,
           }
         });
-      };
-
-      pc.onTrack = (event) {
-        if (event.streams.isNotEmpty) {
-          _remoteStreams[partnerId] = event.streams[0];
-          log('Remote track from $partnerId.');
-        }
       };
 
       await _ensureLocalStream();
@@ -625,6 +637,239 @@ class WebRTCService extends ChangeNotifier {
       'targetId': targetId,
       'payload': payload,
     });
+  }
+
+  // --- Serverless pairing (QR / LAN) — non-trickle SDP, no signaling server --
+  //
+  // The full offer/answer (with ICE candidates bundled in — non-trickle) is
+  // exchanged directly between two phones via a QR code or a LAN socket. The
+  // payload carries the signed DTLS-fingerprint chain, verified offline by
+  // verifyPeerSignature, so it is MitM-safe without any server.
+
+  static const _kQrKey = '__pairing__';
+
+  /// Build a peer connection for pairing. ICE-candidate collection and the
+  /// gathering-complete signal are wired up here — *before* the caller sets the
+  /// local description — so we never miss the completion event (host candidates
+  /// on a LAN gather almost instantly, and registering the handler afterwards
+  /// races that and would force the timeout).
+  Future<RTCPeerConnection> _newPairingPeer(String key, {required bool isInitiator}) async {
+    final pc = await createPeerConnection(await _getIceConfig());
+    _peerConnections[key] = pc;
+    _isInitiatorFor[key] = isInitiator;
+    _wirePeerCommon(key, pc);
+
+    final gatherDone = Completer<void>();
+    final collected = <RTCIceCandidate>[];
+    _iceGatherComplete[key] = gatherDone;
+    _pairingCandidates[key] = collected;
+    pc.onIceCandidate = (candidate) {
+      if (candidate.candidate == null || candidate.candidate!.isEmpty) {
+        if (!gatherDone.isCompleted) gatherDone.complete();
+      } else {
+        collected.add(candidate);
+      }
+    };
+    pc.onIceGatheringState = (state) {
+      if (state == RTCIceGatheringState.RTCIceGatheringStateComplete && !gatherDone.isCompleted) {
+        gatherDone.complete();
+      }
+    };
+
+    await _ensureLocalStream();
+    for (final track in _localStream!.getTracks()) {
+      await pc.addTrack(track, _localStream!);
+    }
+    if (isInitiator) {
+      final dc = await pc.createDataChannel('p2ptalk_ctrl', RTCDataChannelInit()..binaryType = 'text');
+      _dataChannels[key] = dc;
+      _setupDataChannel(key, dc);
+    } else {
+      pc.onDataChannel = (channel) {
+        _dataChannels[key] = channel;
+        _setupDataChannel(key, channel);
+      };
+    }
+    return pc;
+  }
+
+  /// Wait for ICE gathering to finish (using the completer wired in
+  /// [_newPairingPeer]), then return the local description with all gathered
+  /// candidates embedded. Non-trickle: the QR payload must be self-contained.
+  Future<RTCSessionDescription> _gatheredLocalDescription(String key, RTCPeerConnection pc) async {
+    if (pc.iceGatheringState != RTCIceGatheringState.RTCIceGatheringStateComplete) {
+      final completer = _iceGatherComplete[key];
+      if (completer != null && !completer.isCompleted) {
+        // Proceed with whatever candidates we have after 5s (LAN host
+        // candidates are usually ready almost immediately).
+        await completer.future.timeout(const Duration(seconds: 5), onTimeout: () {});
+      }
+    }
+    final desc = (await pc.getLocalDescription())!;
+    var sdp = desc.sdp!;
+    if (!sdp.contains('a=candidate:')) {
+      sdp = _injectCandidates(sdp, _pairingCandidates[key] ?? const []);
+    }
+    return RTCSessionDescription(sdp, desc.type);
+  }
+
+  /// Inject collected ICE candidates into [sdp] at the end of their respective
+  /// media sections (keyed by sdpMLineIndex). Used when the platform doesn't
+  /// already fold gathered candidates into getLocalDescription().
+  String _injectCandidates(String sdp, List<RTCIceCandidate> candidates) {
+    final byIndex = <int, List<String>>{};
+    for (final c in candidates) {
+      final cand = c.candidate;
+      if (cand == null || cand.isEmpty) continue;
+      final idx = c.sdpMLineIndex ?? 0;
+      byIndex.putIfAbsent(idx, () => []).add(cand.startsWith('a=') ? cand : 'a=$cand');
+    }
+    if (byIndex.isEmpty) return sdp;
+    final lines = sdp.split(RegExp(r'\r?\n'));
+    final out = <String>[];
+    var mIndex = -1;
+    for (final line in lines) {
+      if (line.startsWith('m=')) {
+        if (mIndex >= 0 && byIndex[mIndex] != null) out.addAll(byIndex[mIndex]!);
+        mIndex++;
+      }
+      out.add(line);
+    }
+    if (mIndex >= 0 && byIndex[mIndex] != null) {
+      var insertAt = out.length;
+      while (insertAt > 0 && out[insertAt - 1].trim().isEmpty) {
+        insertAt--;
+      }
+      out.insertAll(insertAt, byIndex[mIndex]!);
+    }
+    return out.join('\r\n');
+  }
+
+  /// Move a peer connection (and its bookkeeping) from a placeholder key to the
+  /// real peerId once it's known, re-wiring the connection-state/track handlers
+  /// and data channel so they reference the correct id.
+  void _rekeyPeer(String fromKey, String toKey) {
+    if (fromKey == toKey) return;
+    final pc = _peerConnections.remove(fromKey);
+    if (pc == null) return;
+    _peerConnections[toKey] = pc;
+    _wirePeerCommon(toKey, pc);
+    final dc = _dataChannels.remove(fromKey);
+    if (dc != null) {
+      _dataChannels[toKey] = dc;
+      _setupDataChannel(toKey, dc);
+    }
+    final init = _isInitiatorFor.remove(fromKey);
+    if (init != null) _isInitiatorFor[toKey] = init;
+    final gather = _iceGatherComplete.remove(fromKey);
+    if (gather != null) _iceGatherComplete[toKey] = gather;
+    final cands = _pairingCandidates.remove(fromKey);
+    if (cands != null) _pairingCandidates[toKey] = cands;
+  }
+
+  /// Gzip + base64 a signed pairing payload (compact enough for one QR code):
+  /// the SDP, the device→identity auth chain, and the signed DTLS fingerprint.
+  Future<String> _encodePairing(RTCSessionDescription desc) async {
+    final fp = _extractFingerprint(desc.sdp!);
+    final chain = _account.authChain;
+    final payload = <String, dynamic>{'sdp': desc.sdp, 'type': desc.type};
+    if (chain != null) payload['auth'] = chain.toJson();
+    if (fp != null) {
+      final sig = await _account.signPayload(fp);
+      if (sig != null) payload['fpSig'] = sig;
+    }
+    return base64Encode(gzip.encode(utf8.encode(jsonEncode(payload))));
+  }
+
+  Map<String, dynamic> _decodePairing(String encoded) {
+    final json = utf8.decode(gzip.decode(base64Decode(encoded.trim())));
+    return Map<String, dynamic>.from(jsonDecode(json));
+  }
+
+  Future<bool> _verifyPairing(Map<String, dynamic> payload) async {
+    if (payload['auth'] == null || payload['fpSig'] == null) return false;
+    final chain = AuthChain.fromJson(Map<String, dynamic>.from(payload['auth']));
+    final fp = _extractFingerprint(payload['sdp']);
+    if (fp == null) return false;
+    return _account.verifyPeerSignature(chain, fp, payload['fpSig']);
+  }
+
+  /// Step 1 (initiator): create the offer to show as a QR code. The peer's id
+  /// isn't known yet, so the connection is parked under [_kQrKey] and re-keyed
+  /// to the real peerId in [applyPairingAnswer].
+  Future<String> createPairingOffer() async {
+    // Tear down any parked connection from a previous, abandoned invite so we
+    // don't leak a peer connection (and its mic track) on retry.
+    if (_peerConnections.containsKey(_kQrKey)) await _disconnectPeer(_kQrKey);
+    _connectionState = P2PConnectionState.connecting;
+    notifyListeners();
+    final pc = await _newPairingPeer(_kQrKey, isInitiator: true);
+    final offer = await pc.createOffer();
+    final munged = RTCSessionDescription(_mungeSdp(offer.sdp!), offer.type);
+    await pc.setLocalDescription(munged);
+    return await _encodePairing(await _gatheredLocalDescription(_kQrKey, pc));
+  }
+
+  /// Step 2 (responder): consume the scanned offer, return the answer QR payload.
+  /// The offer carries the initiator's signed chain, so we know the peerId up
+  /// front and key the connection by it directly.
+  Future<String?> acceptPairingOffer(String encodedOffer) async {
+    final payload = _decodePairing(encodedOffer);
+    if (!await _verifyPairing(payload)) {
+      onPeerVerificationFailed?.call('pairing');
+      return null;
+    }
+    final chain = AuthChain.fromJson(Map<String, dynamic>.from(payload['auth']));
+    final peerId = chain.accountId;
+    _connectionState = P2PConnectionState.connecting;
+    _activePartnerId = peerId;
+    notifyListeners();
+    final pc = await _newPairingPeer(peerId, isInitiator: false);
+    _peerChains[peerId] = chain;
+    _verifiedPeers.add(peerId);
+    await pc.setRemoteDescription(RTCSessionDescription(payload['sdp'], payload['type']));
+    final answer = await pc.createAnswer();
+    final munged = RTCSessionDescription(_mungeSdp(answer.sdp!), answer.type);
+    await pc.setLocalDescription(munged);
+    return await _encodePairing(await _gatheredLocalDescription(peerId, pc));
+  }
+
+  /// Step 3 (initiator): consume the scanned answer to finish the connection.
+  Future<bool> applyPairingAnswer(String encodedAnswer) async {
+    final payload = _decodePairing(encodedAnswer);
+    if (!await _verifyPairing(payload)) {
+      onPeerVerificationFailed?.call('pairing');
+      return false;
+    }
+    final chain = AuthChain.fromJson(Map<String, dynamic>.from(payload['auth']));
+    final peerId = chain.accountId;
+    final pc = _peerConnections[_kQrKey];
+    if (pc == null) return false;
+    // Now that we know who answered, re-key the parked connection so the
+    // connection manager, ICE-restart logic, and data channel all use the
+    // real peerId instead of the placeholder.
+    _rekeyPeer(_kQrKey, peerId);
+    _peerChains[peerId] = chain;
+    _verifiedPeers.add(peerId);
+    _activePartnerId = peerId;
+    notifyListeners();
+    await pc.setRemoteDescription(RTCSessionDescription(payload['sdp'], payload['type']));
+    return true;
+  }
+
+  /// Apply a remote pairing payload received over a LAN socket (mDNS rung) and,
+  /// if it was an offer, return the answer payload to send back.
+  Future<String?> handleLanPairing(String encoded, {required bool weInitiated}) async {
+    final payload = _decodePairing(encoded);
+    if (!await _verifyPairing(payload)) {
+      onPeerVerificationFailed?.call('pairing');
+      return null;
+    }
+    if (weInitiated) {
+      await applyPairingAnswer(encoded);
+      return null;
+    }
+    return acceptPairingOffer(encoded);
   }
 
   // --- SDP munging (Opus DTX + low bitrate for data efficiency) -------------

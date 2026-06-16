@@ -73,6 +73,8 @@
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>p2p-talk uses the microphone to capture your voice and stream it to your partner in real time.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>p2p-talk uses the camera to scan a partner's pairing QR code when connecting without a server.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>p2p-talk uses Bluetooth to find nearby partners and connect automatically.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>

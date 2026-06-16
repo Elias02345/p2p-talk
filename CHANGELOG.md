@@ -2,6 +2,33 @@
 
 All notable changes to p2p-talk are documented here.
 
+## [2.2.0] — 2026-06-16
+
+Serverless pairing release — two phones can now connect with **no server and no
+network infrastructure** by scanning each other's QR codes.
+
+### Added
+- **Serverless QR pairing** (`Contacts → QR icon → PairingScreen`): one phone shows
+  an invite QR, the other scans it and shows a response QR back. The full WebRTC
+  offer/answer is exchanged inside the codes — no signaling server needed. The signed
+  DTLS-fingerprint chain travels in the payload and is verified **offline**
+  (`verifyPeerSignature`), so the link is MitM-safe without a server.
+- **BLE advertising** so adjacent phones surface each other for pairing (service UUID
+  `7b2d…702d` + `p2ptalk_<name>`).
+
+### Fixed
+- **Non-trickle ICE**: the pairing SDP now waits for ICE gathering to finish and embeds
+  all candidates (injecting them into the SDP if the platform doesn't fold them in
+  itself), so a scanned offer/answer is self-contained and actually connects.
+- **ICE-gathering race**: the gathering-complete handler is now wired up *before*
+  `setLocalDescription`, so fast LAN host-candidate gathering can't complete before we
+  start listening (previously forced a 4 s stall).
+- **Peer re-keying**: the initiator's pairing connection is re-keyed from the internal
+  placeholder to the real account id once the answer is verified, so connection
+  tracking, ICE-restart, and the data channel reference the correct peer.
+- **QR capacity**: payloads are bounded to a conservative size and the QR widget shows a
+  friendly "too large" fallback instead of crashing if a payload ever exceeds capacity.
+
 ## [2.1.0] — 2026-06-16
 
 Repair & resilience release — fixes the "nothing works" failures.

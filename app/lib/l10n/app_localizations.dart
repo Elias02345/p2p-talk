@@ -926,6 +926,78 @@ abstract class AppLocalizations {
   /// **'Could not restore the account. Check the phrase and server URL.'**
   String get onbRestoreFailed;
 
+  /// No description provided for @pairTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Pair nearby (no server)'**
+  String get pairTitle;
+
+  /// No description provided for @pairIntro.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect two phones directly, with no server. One phone shows an invite code; the other scans it, then shows a response code back.'**
+  String get pairIntro;
+
+  /// No description provided for @pairShowInvite.
+  ///
+  /// In en, this message translates to:
+  /// **'Show invite code'**
+  String get pairShowInvite;
+
+  /// No description provided for @pairScanInvite.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan a code'**
+  String get pairScanInvite;
+
+  /// No description provided for @pairScanResponse.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan partner\'s response'**
+  String get pairScanResponse;
+
+  /// No description provided for @pairShowResponse.
+  ///
+  /// In en, this message translates to:
+  /// **'Show this response to your partner'**
+  String get pairShowResponse;
+
+  /// No description provided for @pairPointCamera.
+  ///
+  /// In en, this message translates to:
+  /// **'Point at the other phone\'s code'**
+  String get pairPointCamera;
+
+  /// No description provided for @pairConnecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Paired — connecting…'**
+  String get pairConnecting;
+
+  /// No description provided for @pairConnected.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected!'**
+  String get pairConnected;
+
+  /// No description provided for @pairInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid or unverified code — try again'**
+  String get pairInvalid;
+
+  /// No description provided for @pairTooLarge.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not encode the code. Make sure both phones are on the same Wi-Fi and retry.'**
+  String get pairTooLarge;
+
+  /// No description provided for @pairCameraDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'Camera permission is needed to scan codes'**
+  String get pairCameraDenied;
+
   /// No description provided for @contactsTitle.
   ///
   /// In en, this message translates to:
