@@ -2,9 +2,9 @@
 Description=p2p-talk auto-update timer (polls for updates)
 
 [Timer]
-# First check shortly after boot, then every 10 minutes.
+# First check shortly after boot, then every 15 minutes.
 OnBootSec=5min
-OnUnitActiveSec=10min
+OnUnitActiveSec=15min
 Persistent=true
 
 [Install]

@@ -10,11 +10,13 @@ const dbPath = process.env.DB_PATH
 
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
-    console.error('Failed to connect to SQLite database:', err);
-  } else {
-    console.log('Connected to SQLite database at', dbPath);
-    initializeDatabase();
+    // Fail fast and loud: a silent DB failure otherwise looks like a dead origin.
+    console.error('[FATAL] Cannot open SQLite database at', dbPath, '-', err.message);
+    console.error('[FATAL] Check that the data directory is writable by the app user.');
+    process.exit(1);
   }
+  console.log('Connected to SQLite database at', dbPath);
+  initializeDatabase();
 });
 
 /** Execute a SELECT query and return all matching rows. */

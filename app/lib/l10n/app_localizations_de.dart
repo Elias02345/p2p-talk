@@ -163,6 +163,18 @@ class AppLocalizationsDe extends AppLocalizations {
   String get settingsServerUrl => 'Signaling-Server-URL';
 
   @override
+  String get settingsVadTitle => 'Mikrofon-Empfindlichkeit';
+
+  @override
+  String get settingsVadStrict => 'Streng — nur Stimme (empfohlen)';
+
+  @override
+  String get settingsVadBalanced => 'Ausgewogen';
+
+  @override
+  String get settingsVadSensitive => 'Empfindlich — nimmt mehr auf';
+
+  @override
   String get settingsAudioSection => 'Audio-Modus';
 
   @override

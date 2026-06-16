@@ -29,12 +29,16 @@ check "Docker Compose available"    bash -c 'docker compose version || docker-co
 check "openssl present"             command_exists openssl
 check ".env exists"                 test -f "${ENV_FILE}"
 check "JWT_SECRET set"              bash -c "grep -q '^JWT_SECRET=.\+' '${ENV_FILE}'"
-check "TURN_SHARED_SECRET set"      bash -c "grep -q '^TURN_SHARED_SECRET=.\+' '${ENV_FILE}'"
+TURN_MODE_VAL="$(grep -m1 '^TURN_MODE=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- || echo coturn)"
+if [[ "${TURN_MODE_VAL}" == "coturn" ]]; then
+  check "TURN_SHARED_SECRET set (coturn)" bash -c "grep -q '^TURN_SHARED_SECRET=.\+' '${ENV_FILE}'"
+fi
 check "systemd unit installed"      test -f "/etc/systemd/system/${SERVICE_NAME}.service"
 check "service enabled"             systemctl is-enabled "${SERVICE_NAME}"
 check "service active"              systemctl is-active "${SERVICE_NAME}"
 
 PORT_VAL="$(grep -m1 '^PORT=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2 || echo 3000)"; : "${PORT_VAL:=3000}"
+check "landing page responds"       curl -fsS "http://127.0.0.1:${PORT_VAL}/"
 check "health endpoint responds"    curl -fsS "http://127.0.0.1:${PORT_VAL}/health"
 
 # coturn STUN reachability (best effort; needs turnutils_stunclient).

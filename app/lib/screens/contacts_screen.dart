@@ -54,7 +54,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
     final contacts = await account.fetchContacts();
     final nearby = await account.fetchNearby();
-    ble.startScanning();
+    ble.startScanning(advertiseAs: account.username);
     if (mounted) {
       setState(() {
         _contacts = contacts;

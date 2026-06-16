@@ -392,6 +392,30 @@ abstract class AppLocalizations {
   /// **'Signaling server URL'**
   String get settingsServerUrl;
 
+  /// No description provided for @settingsVadTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Microphone sensitivity'**
+  String get settingsVadTitle;
+
+  /// No description provided for @settingsVadStrict.
+  ///
+  /// In en, this message translates to:
+  /// **'Strict — voice only (recommended)'**
+  String get settingsVadStrict;
+
+  /// No description provided for @settingsVadBalanced.
+  ///
+  /// In en, this message translates to:
+  /// **'Balanced'**
+  String get settingsVadBalanced;
+
+  /// No description provided for @settingsVadSensitive.
+  ///
+  /// In en, this message translates to:
+  /// **'Sensitive — picks up more'**
+  String get settingsVadSensitive;
+
   /// No description provided for @settingsAudioSection.
   ///
   /// In en, this message translates to:

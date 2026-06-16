@@ -19,6 +19,7 @@ services:
   coturn:
     image: coturn/coturn:4.6
     container_name: p2ptalk-coturn
+    profiles: ["relay"]
     network_mode: host
     restart: unless-stopped
     volumes:

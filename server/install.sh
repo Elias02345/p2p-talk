@@ -123,8 +123,13 @@ log "Building and starting the stack (first run may take a while)..."
 CMD="$(compose_cmd)"
 cd "${DOCKER_DIR}"
 PROFILE_ARGS=()
+TURN_MODE_NOW="$(grep -m1 '^TURN_MODE=' "${ENV_FILE}" | cut -d= -f2- || echo coturn)"
+if [[ "${TURN_MODE_NOW}" == "coturn" ]]; then
+  PROFILE_ARGS+=(--profile relay)
+  log "Self-hosted coturn relay enabled (TURN_MODE=coturn)"
+fi
 if grep -q '^TUNNEL_TOKEN=.\+' "${ENV_FILE}"; then
-  PROFILE_ARGS=(--profile tunnel)
+  PROFILE_ARGS+=(--profile tunnel)
   log "Cloudflare Tunnel enabled (bundled cloudflared container)"
 fi
 retry 3 20 ${CMD} -f "${ACTIVE_COMPOSE}" --env-file "${ENV_FILE}" "${PROFILE_ARGS[@]}" build

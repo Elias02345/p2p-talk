@@ -66,6 +66,7 @@ Future<void> main() async {
   await localeProvider.load();
 
   final localMode = prefs.getBool(kPrefLocalMode) ?? false;
+  final vadSensitivity = prefs.getString('p2ptalk_vad_sensitivity');
 
   runApp(P2PTalkApp(
     account: account,
@@ -73,6 +74,7 @@ Future<void> main() async {
     serverUrl: serverUrl,
     isIntercomMode: isIntercomMode,
     localMode: localMode,
+    vadSensitivity: vadSensitivity,
   ));
 }
 
@@ -82,6 +84,7 @@ class P2PTalkApp extends StatelessWidget {
   final String serverUrl;
   final bool isIntercomMode;
   final bool localMode;
+  final String? vadSensitivity;
 
   const P2PTalkApp({
     super.key,
@@ -90,6 +93,7 @@ class P2PTalkApp extends StatelessWidget {
     required this.serverUrl,
     required this.isIntercomMode,
     required this.localMode,
+    required this.vadSensitivity,
   });
 
   @override
@@ -107,6 +111,10 @@ class P2PTalkApp extends StatelessWidget {
     if (isIntercomMode) audioManager.setIntercomMode(true);
     if (serverUrl.isNotEmpty) webRTCService.init(serverUrl);
     vadService.init();
+    if (vadSensitivity != null) {
+      final s = VadSensitivity.values.where((e) => e.name == vadSensitivity);
+      if (s.isNotEmpty) vadService.setSensitivity(s.first);
+    }
     bleService.init();
     geofenceService.init();
 
@@ -118,7 +126,7 @@ class P2PTalkApp extends StatelessWidget {
     geofenceService.onEnterGym = (gym) async {
       webRTCService.setIntercomActive(true);
       await vadService.start();
-      bleService.startScanning();
+      bleService.startScanning(advertiseAs: account.username);
       await webRTCService.connectWebSocket();
       final token = await account.getToken();
       if (account.accountId != null) {

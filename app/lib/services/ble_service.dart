@@ -1,11 +1,16 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../utils/logger.dart';
 
 /// BLE advertised name prefix used to discover nearby p2p-talk users.
 const String kBlePrefix = 'p2ptalk_';
+
+/// Fixed app service UUID so peers can filter scans by UUID (robust on iOS,
+/// where the custom local name is not reliably advertised).
+const String kP2pTalkServiceUuid = '7b2dca10-9b2f-4f1e-9b6a-70747032702d';
 
 class NearbyDevice {
   final String id;
@@ -24,9 +29,11 @@ class NearbyDevice {
 class BleService extends ChangeNotifier {
   final List<NearbyDevice> _nearbyDevices = [];
   bool _isScanning = false;
+  bool _isAdvertising = false;
   StreamSubscription<List<ScanResult>>? _scanResultsSub;
   StreamSubscription<bool>? _isScanningSub;
   DateTime? _lastScanStart;
+  final FlutterBlePeripheral _peripheral = FlutterBlePeripheral();
 
   // Debounce: ignore repeated scan requests within this window to save battery
   // (geofence triggers can otherwise oscillate at a gym boundary).
@@ -35,6 +42,7 @@ class BleService extends ChangeNotifier {
 
   List<NearbyDevice> get nearbyDevices => _nearbyDevices;
   bool get isScanning => _isScanning;
+  bool get isAdvertising => _isAdvertising;
 
   Future<void> init() async {
     await _isScanningSub?.cancel();
@@ -59,7 +67,10 @@ class BleService extends ChangeNotifier {
         statuses[Permission.bluetoothConnect]?.isGranted == true;
   }
 
-  Future<void> startScanning({bool force = false}) async {
+  Future<void> startScanning({bool force = false, String? advertiseAs}) async {
+    // Make THIS phone discoverable too — otherwise two phones only ever scan and
+    // never see each other (the core "no peers nearby" bug).
+    if (advertiseAs != null) await startAdvertising(advertiseAs);
     if (_isScanning) return;
     if (!force && _lastScanStart != null &&
         DateTime.now().difference(_lastScanStart!) < _scanDebounce) {
@@ -95,6 +106,40 @@ class BleService extends ChangeNotifier {
     } catch (e) {
       log('Error stopping BLE scan: $e');
     }
+    await stopAdvertising();
+  }
+
+  /// Advertise this device so nearby p2p-talk phones can discover it. Without
+  /// this, two phones would only ever scan and never find each other.
+  Future<void> startAdvertising(String username) async {
+    if (_isAdvertising) return;
+    try {
+      if (!await _peripheral.isSupported) {
+        log('BLE peripheral/advertising not supported on this device.');
+        return;
+      }
+      final data = AdvertiseData(
+        serviceUuid: kP2pTalkServiceUuid,
+        localName: '$kBlePrefix$username',
+      );
+      await _peripheral.start(advertiseData: data);
+      _isAdvertising = true;
+      notifyListeners();
+      log('BLE advertising as $kBlePrefix$username');
+    } catch (e) {
+      log('Error starting BLE advertising: $e');
+    }
+  }
+
+  Future<void> stopAdvertising() async {
+    if (!_isAdvertising) return;
+    try {
+      await _peripheral.stop();
+    } catch (e) {
+      log('Error stopping BLE advertising: $e');
+    }
+    _isAdvertising = false;
+    notifyListeners();
   }
 
   void _processScanResults(List<ScanResult> results) {
@@ -129,6 +174,7 @@ class BleService extends ChangeNotifier {
   void dispose() {
     _scanResultsSub?.cancel();
     _isScanningSub?.cancel();
+    stopAdvertising();
     super.dispose();
   }
 }

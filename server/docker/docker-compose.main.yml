@@ -21,9 +21,13 @@ services:
       - p2ptalk-data:/app/data
     restart: unless-stopped
 
+  # Self-hosted relay — only started with TURN_MODE=coturn (compose profile
+  # "relay"). Behind a Cloudflare Tunnel use TURN_MODE=cloudflare/none instead;
+  # coturn then never runs and can't crash-loop the stack.
   coturn:
     image: coturn/coturn:4.6
     container_name: p2ptalk-coturn
+    profiles: ["relay"]
     network_mode: host
     restart: unless-stopped
     volumes:

@@ -10,6 +10,7 @@ import '../services/audio_manager.dart';
 import '../services/connection_manager.dart';
 import '../services/notification_service.dart';
 import '../services/account_service.dart';
+import '../services/vad_service.dart';
 import 'onboarding_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -138,6 +139,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ]),
             const SizedBox(height: 20),
 
+            _card(t.settingsVadTitle, [_vadSelector(t)]),
+            const SizedBox(height: 20),
+
             _card(t.settingsLanguage, [_languageSelector(t)]),
             const SizedBox(height: 20),
 
@@ -208,7 +212,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   : Text(t.settingsSave, style: const TextStyle(fontWeight: FontWeight.bold)),
             ),
             const SizedBox(height: 16),
-            Center(child: Text(t.settingsVersion('2.0.2'), style: const TextStyle(color: textGray, fontSize: 11))),
+            Center(child: Text(t.settingsVersion('2.1.0'), style: const TextStyle(color: textGray, fontSize: 11))),
             const SizedBox(height: 24),
           ],
         ),
@@ -268,6 +272,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     ];
+  }
+
+  Widget _vadSelector(AppLocalizations t) {
+    final vad = Provider.of<VadService>(context);
+    Widget tile(String label, VadSensitivity value) {
+      final selected = vad.sensitivity == value;
+      return ListTile(
+        contentPadding: EdgeInsets.zero,
+        dense: true,
+        onTap: () async {
+          await vad.setSensitivity(value);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('p2ptalk_vad_sensitivity', value.name);
+        },
+        leading: Icon(selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+            color: selected ? neonCyan : textGray, size: 20),
+        title: Text(label, style: const TextStyle(color: Colors.white, fontSize: 14)),
+      );
+    }
+
+    return Column(children: [
+      tile(t.settingsVadStrict, VadSensitivity.strict),
+      tile(t.settingsVadBalanced, VadSensitivity.balanced),
+      tile(t.settingsVadSensitive, VadSensitivity.sensitive),
+    ]);
   }
 
   Widget _languageSelector(AppLocalizations t) {

@@ -138,6 +138,12 @@ async function run() {
     assert.strictEqual(r.body.status, 'ok');
   });
 
+  await check('landing page at / responds with HTML', async () => {
+    const r = await getJson('/');
+    assert.strictEqual(r.status, 200);
+    assert.ok(typeof r.body === 'string' && r.body.includes('p2p-talk'), 'landing HTML served');
+  });
+
   const alice = await makeAccount('alice_test');
   const bob = await makeAccount('bob_test');
 

@@ -75,6 +75,7 @@ class AccountService extends ChangeNotifier {
   static const _kDeviceSeed = 'p2ptalk_device_seed';
   static const _kDevicePub = 'p2ptalk_device_pub';
   static const _kAuthSig = 'p2ptalk_auth_sig';
+  static const _kPendingSync = 'p2ptalk_pending_sync';
 
   final _ed = Ed25519();
 
@@ -85,6 +86,9 @@ class AccountService extends ChangeNotifier {
   String? _devicePublicKey; // base64
   String? _authorizationSig; // base64
   List<int>? _deviceSeed; // 32 bytes, in-memory only after load
+  // True when the account exists locally but isn't yet registered/enrolled on a
+  // server (created offline, or server was unreachable). Synced lazily.
+  bool _pendingSync = false;
 
   String? _token;
   DateTime? _tokenExpiry;
@@ -95,6 +99,7 @@ class AccountService extends ChangeNotifier {
   String? get identityPublicKey => _identityPublicKey;
   String? get devicePublicKey => _devicePublicKey;
   bool get isRegistered => _accountId != null && _devicePublicKey != null;
+  bool get isPendingSync => _pendingSync;
 
   void setApiBaseUrl(String wsOrHttpUrl) {
     _apiBaseUrl = wsOrHttpUrl
@@ -123,6 +128,7 @@ class AccountService extends ChangeNotifier {
       _authorizationSig = await _storage.read(key: _kAuthSig);
       final seedB64 = await _storage.read(key: _kDeviceSeed);
       if (seedB64 != null) _deviceSeed = base64Decode(seedB64);
+      _pendingSync = (await _storage.read(key: _kPendingSync)) == 'true';
     } catch (e) {
       log('AccountService.load error: $e');
     }
@@ -159,27 +165,29 @@ class AccountService extends ChangeNotifier {
 
   // --- account lifecycle ---------------------------------------------------
 
-  /// Create a brand-new account. Returns the recovery mnemonic for the user to
-  /// back up. Throws on failure (e.g. username taken, server unreachable).
+  /// Create a brand-new account. The keypair + accountId are derived and stored
+  /// LOCALLY first, so this never blocks on the server — registration/enrollment
+  /// happen lazily when a server is reachable. Returns the recovery mnemonic.
   Future<String> createAccount(String username) async {
     final mnemonic = bip39.generateMnemonic(strength: 256); // 24 words
-    await _initFromMnemonic(mnemonic, username, isRestore: false);
+    await _initFromMnemonic(mnemonic, username);
     return mnemonic;
   }
 
   /// Restore an existing account from its recovery phrase on a new device.
-  /// Enrolls a fresh device subkey. Returns the account's username.
+  /// Derives identity locally; enrolls the fresh device subkey lazily.
   Future<String> restoreAccount(String mnemonic) async {
     final clean = mnemonic.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
     if (!bip39.validateMnemonic(clean)) {
       throw Exception('Invalid recovery phrase');
     }
-    return _initFromMnemonic(clean, null, isRestore: true);
+    await _initFromMnemonic(clean, null);
+    return _username ?? 'account';
   }
 
-  Future<String> _initFromMnemonic(String mnemonic, String? username,
-      {required bool isRestore}) async {
-    // Identity keypair from the first 32 bytes of the BIP39 seed.
+  /// Derive keys locally, persist immediately, then sync to the server in the
+  /// background. Account creation works fully offline.
+  Future<void> _initFromMnemonic(String mnemonic, String? username) async {
     final seed = bip39.mnemonicToSeed(mnemonic);
     final identitySeed = seed.sublist(0, 32);
     final identityKp = await _ed.newKeyPairFromSeed(identitySeed);
@@ -187,59 +195,78 @@ class AccountService extends ChangeNotifier {
     final identityPubB64 = base64Encode(identityPub.bytes);
     final accountId = await _accountIdFromIdentity(identityPub.bytes);
 
-    // Fresh device keypair (each device has its own subkey).
     final deviceKp = await _ed.newKeyPair();
     final deviceSeed = await deviceKp.extractPrivateKeyBytes();
     final devicePub = await deviceKp.extractPublicKey();
     final devicePubB64 = base64Encode(devicePub.bytes);
-
-    // Identity key authorizes the device key by signing its raw public key.
     final authSig = await _sign(identitySeed, devicePub.bytes);
 
-    // Register the account (idempotent on the identity key — restore returns
-    // the existing username).
-    final reg = await _post('/api/account/register', {
-      'username': username ?? 'restore',
-      'identityPublicKey': identityPubB64,
-    });
-    if (reg == null) throw Exception('Server unreachable');
-    if (reg.statusCode == 409) throw Exception('Username already taken');
-    if (reg.statusCode != 200) throw Exception('Registration failed (${reg.statusCode})');
-    final regBody = jsonDecode(reg.body);
-    final resolvedUsername = regBody['username'] as String;
-
-    // Enroll this device.
-    final enroll = await _post('/api/account/device', {
-      'accountId': accountId,
-      'devicePublicKey': devicePubB64,
-      'authorizationSig': authSig,
-      'deviceLabel': defaultTargetPlatform.name,
-    });
-    if (enroll == null || enroll.statusCode != 200) {
-      throw Exception('Device enrollment failed');
-    }
-
-    // Persist.
+    // Persist locally FIRST — the account now exists on this device.
     _accountId = accountId;
-    _username = resolvedUsername;
+    _username = username ?? 'p2p-${accountId.substring(0, 6)}';
     _identityPublicKey = identityPubB64;
     _devicePublicKey = devicePubB64;
     _authorizationSig = authSig;
     _deviceSeed = deviceSeed;
+    _pendingSync = true;
+    _token = null;
+    _tokenExpiry = null;
 
     await _storage.write(key: _kMnemonic, value: mnemonic);
     await _storage.write(key: _kAccountId, value: accountId);
-    await _storage.write(key: _kUsername, value: resolvedUsername);
+    await _storage.write(key: _kUsername, value: _username);
     await _storage.write(key: _kIdentityPub, value: identityPubB64);
     await _storage.write(key: _kDeviceSeed, value: base64Encode(deviceSeed));
     await _storage.write(key: _kDevicePub, value: devicePubB64);
     await _storage.write(key: _kAuthSig, value: authSig);
+    await _storage.write(key: _kPendingSync, value: 'true');
 
-    _token = null;
-    _tokenExpiry = null;
     notifyListeners();
-    log('Account ${isRestore ? "restored" : "created"}: $resolvedUsername ($accountId)');
-    return resolvedUsername;
+    log('Account created locally: $_username ($accountId) — pending server sync');
+
+    // Try to sync now (non-blocking; safe to fail offline).
+    await _syncRegistration();
+  }
+
+  /// Register the account + enroll this device on the server. No-op if already
+  /// synced or the server is unreachable (stays pending, retried later).
+  Future<bool> _syncRegistration() async {
+    if (!_pendingSync || _accountId == null) return !_pendingSync;
+    try {
+      final reg = await _post('/api/account/register', {
+        'username': _username,
+        'identityPublicKey': _identityPublicKey,
+      });
+      if (reg == null) return false; // server unreachable — stay pending
+      if (reg.statusCode == 200) {
+        final serverName = jsonDecode(reg.body)['username'] as String?;
+        if (serverName != null && serverName != _username) {
+          _username = serverName; // server is source of truth (e.g. on restore)
+          await _storage.write(key: _kUsername, value: _username);
+        }
+      } else if (reg.statusCode != 409) {
+        return false; // transient server error — retry later
+      }
+      // (409 = username taken by a different identity; keep local account, the
+      //  user can change the name later. Enrollment below still proceeds.)
+
+      final enroll = await _post('/api/account/device', {
+        'accountId': _accountId,
+        'devicePublicKey': _devicePublicKey,
+        'authorizationSig': _authorizationSig,
+        'deviceLabel': defaultTargetPlatform.name,
+      });
+      if (enroll == null || enroll.statusCode != 200) return false;
+
+      _pendingSync = false;
+      await _storage.write(key: _kPendingSync, value: 'false');
+      notifyListeners();
+      log('Account synced to server ($_accountId)');
+      return true;
+    } catch (e) {
+      log('account sync error: $e');
+      return false;
+    }
   }
 
   /// The stored recovery phrase, for re-display/backup in Settings.
@@ -247,10 +274,16 @@ class AccountService extends ChangeNotifier {
 
   // --- session token (challenge–response) ----------------------------------
 
-  /// Return a valid session JWT, authenticating if needed. Null on failure.
+  /// Return a valid session JWT, authenticating if needed. Null on failure
+  /// (e.g. offline / not yet synced — the app then uses local signaling rungs).
   Future<String?> getToken() async {
     if (_token != null && _tokenExpiry != null && DateTime.now().isBefore(_tokenExpiry!)) {
       return _token;
+    }
+    // A device must be enrolled server-side before it can authenticate.
+    if (_pendingSync) {
+      final synced = await _syncRegistration();
+      if (!synced) return null;
     }
     return _authenticate();
   }

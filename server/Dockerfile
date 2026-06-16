@@ -8,22 +8,23 @@ RUN npm ci --omit=dev
 FROM node:20-alpine
 WORKDIR /app
 
-# Non-root user
-RUN addgroup -S p2ptalk && adduser -S p2ptalk -G p2ptalk
+# su-exec lets the entrypoint fix volume perms as root, then drop privileges.
+RUN apk add --no-cache su-exec && addgroup -S p2ptalk && adduser -S p2ptalk -G p2ptalk
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY server.js ./
 COPY db.js ./
 COPY lib ./lib
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# SQLite DB directory (mounted as a volume; DB_PATH should point here in prod).
-RUN mkdir -p /app/data && chown -R p2ptalk:p2ptalk /app
+RUN mkdir -p /app/data && chown -R p2ptalk:p2ptalk /app && chmod +x /usr/local/bin/entrypoint.sh
 
-USER p2ptalk
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD wget -qO- http://localhost:3000/health || exit 1
 
+# Entrypoint runs as root only to chown the mounted volume, then execs node as p2ptalk.
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["node", "server.js"]

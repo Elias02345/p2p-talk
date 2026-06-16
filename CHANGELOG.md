@@ -2,6 +2,37 @@
 
 All notable changes to p2p-talk are documented here.
 
+## [2.1.0] — 2026-06-16
+
+Repair & resilience release — fixes the "nothing works" failures.
+
+### Fixed
+- **Dead server**: the systemd launcher no longer uses `--abort-on-container-exit`,
+  so a coturn hiccup can't take the signaling server down. coturn is now an opt-in
+  compose profile (`relay`) — it only runs with `TURN_MODE=coturn`, so it can't
+  crash-loop a CloudGate deployment. A Docker entrypoint fixes the `/app/data`
+  volume permissions and `db.js` now fails fast with a clear log instead of hanging.
+  `service-start.sh` validates `.env`/secrets before starting.
+- **Account creation**: now works **offline** — the keypair + accountId are derived
+  and stored locally first; server registration/enrollment happen lazily when a
+  server is reachable. "Use without an account" makes zero server calls.
+- **VAD**: now uses tuned Silero thresholds (strict by default) so only sustained
+  voice triggers — gym clangs / road noise no longer open the mic. A
+  Strict/Balanced/Sensitive selector was added in Settings.
+- **No peers nearby**: BLE now **advertises** (service UUID + `p2ptalk_<name>`) in
+  addition to scanning, so two phones can finally discover each other.
+
+### Added
+- **Landing page** at `GET /` — live status (online accounts, connections, active
+  group sessions), relay mode, version/uptime, and a GitHub link.
+- `./update.sh` wrapper at the repo root; auto-update interval changed to 15 min.
+
+### Next increment (designed, not in this build)
+- Automatic serverless **call setup** over local rungs (mDNS LAN socket and
+  BLE-GATT) and **QR / room-code pairing** as the guaranteed offline floor. These
+  need on-device iteration (camera/BLE/mDNS can't be validated in CI), so they are
+  deferred rather than shipped unverified. Design is in the plan/README.
+
 ## [2.0.2] — 2026-06-16
 
 ### Added / Changed

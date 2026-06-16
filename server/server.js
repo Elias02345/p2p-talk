@@ -19,7 +19,7 @@ const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 const WS_HEARTBEAT_INTERVAL = parseInt(process.env.WS_HEARTBEAT_INTERVAL, 10) || 30000;
-const SERVER_VERSION = '2.0.2';
+const SERVER_VERSION = '2.1.0';
 
 const startTime = Date.now();
 
@@ -288,8 +288,49 @@ function ensureSelf(req, res, next) {
 }
 
 // ---------------------------------------------------------------------------
-// REST: health & stats (public)
+// REST: landing page, health & stats (public)
 // ---------------------------------------------------------------------------
+const REPO_URL = 'https://github.com/Elias02345/p2p-talk';
+
+/** Count of distinct accounts online across both transports (WS + HTTP poll). */
+function onlineAccountCount() {
+  const ids = new Set(accountSockets.keys());
+  for (const id of httpClients.keys()) ids.add(id);
+  return ids.size;
+}
+
+// Human-facing status page so the origin never "looks dead".
+app.get('/', (_req, res) => {
+  const uptime = Math.floor((Date.now() - startTime) / 1000);
+  const h = Math.floor(uptime / 3600);
+  const m = Math.floor((uptime % 3600) / 60);
+  const turnMode = (process.env.TURN_MODE || 'coturn').toLowerCase();
+  res.type('html').send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="15"><title>p2p-talk server</title>
+<style>
+:root{color-scheme:dark}
+body{margin:0;font-family:system-ui,Segoe UI,Roboto,sans-serif;background:#0F111A;color:#E8EAF2;
+display:flex;min-height:100vh;align-items:center;justify-content:center}
+.card{background:#181C2E;border:1px solid rgba(255,255,255,.06);border-radius:20px;padding:32px;max-width:460px;width:90%}
+h1{margin:0 0 4px;font-size:26px;color:#00E5FF;letter-spacing:.5px}
+.sub{color:#9094A6;font-size:13px;margin-bottom:20px}
+.row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:14px}
+.row b{color:#fff}.ok{color:#36D399}.muted{color:#9094A6}
+a{color:#00E5FF;text-decoration:none}.btn{display:inline-block;margin-top:20px;padding:10px 16px;border:1px solid #00E5FF;border-radius:12px}
+</style></head><body><div class="card">
+<h1>p2p-talk</h1><div class="sub">signaling server · v${SERVER_VERSION}</div>
+<div class="row"><span>Status</span><b class="ok">● online</b></div>
+<div class="row"><span>Uptime</span><b>${h}h ${m}m</b></div>
+<div class="row"><span>Online accounts</span><b>${onlineAccountCount()}</b></div>
+<div class="row"><span>Connections</span><b>${sockets.size + httpClients.size}</b></div>
+<div class="row"><span>Active group sessions</span><b>${rooms.size}</b></div>
+<div class="row"><span>Signaling</span><b class="ok">HTTP long-poll + WS</b></div>
+<div class="row"><span>Relay (TURN)</span><b class="muted">${turnMode}</b></div>
+<a class="btn" href="${REPO_URL}">View on GitHub →</a>
+</div></body></html>`);
+});
+
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
@@ -305,8 +346,8 @@ app.get('/api/stats', async (_req, res) => {
     const contactsRow = await db.get("SELECT COUNT(*) AS count FROM contacts WHERE status = 'accepted'");
     const gymsRow = await db.get('SELECT COUNT(*) AS count FROM gym_locations');
     res.json({
-      connections: sockets.size,
-      onlineAccounts: accountSockets.size,
+      connections: sockets.size + httpClients.size,
+      onlineAccounts: onlineAccountCount(),
       registeredUsers: usersRow ? usersRow.count : 0,
       acceptedContacts: contactsRow ? contactsRow.count : 0,
       gyms: gymsRow ? gymsRow.count : 0,
