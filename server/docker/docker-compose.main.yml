@@ -1,6 +1,8 @@
 # p2p-talk stack — Standard / CloudGate mode.
-# The Node signaling server binds to 127.0.0.1 only; CloudGate (or a reverse
-# proxy) terminates TLS and forwards public wss://https:// traffic to it.
+# The Node signaling server is exposed on the host so a separate CloudGate VM can
+# reach it over plain HTTP at <server-ip>:<PORT> (no domain/TLS required).
+# Set SIGNALING_BIND in .env to 127.0.0.1 if you instead front it with a local
+# reverse proxy on the same box.
 # coturn uses host networking because TURN relay needs a wide UDP/TCP port range
 # and must advertise the host's reachable address in ICE candidates.
 
@@ -14,7 +16,7 @@ services:
     container_name: p2ptalk-signaling
     env_file: ../.env
     ports:
-      - "127.0.0.1:${PORT:-3000}:3000"
+      - "${SIGNALING_BIND:-0.0.0.0}:${PORT:-3000}:3000"
     volumes:
       - p2ptalk-data:/app/data
     restart: unless-stopped

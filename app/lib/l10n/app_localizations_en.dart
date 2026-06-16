@@ -384,7 +384,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get onbUsername => 'Username';
 
   @override
-  String get onbServerUrl => 'Server URL (e.g. wss://p2p-talk.example.com)';
+  String get onbServerUrl =>
+      'Server URL (e.g. ws://203.0.113.5:3000 or wss://p2p-talk.example.com)';
 
   @override
   String get onbRecoveryTitle => 'Your recovery phrase';

@@ -19,7 +19,7 @@ const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 const WS_HEARTBEAT_INTERVAL = parseInt(process.env.WS_HEARTBEAT_INTERVAL, 10) || 30000;
-const SERVER_VERSION = '2.0.0';
+const SERVER_VERSION = '2.0.1';
 
 const startTime = Date.now();
 

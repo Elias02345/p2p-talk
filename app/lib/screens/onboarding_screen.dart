@@ -20,7 +20,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   bool _busy = false;
   final _usernameController = TextEditingController();
   final _serverController =
-      TextEditingController(text: kDefaultServerUrl.isNotEmpty ? kDefaultServerUrl : 'wss://');
+      TextEditingController(text: kDefaultServerUrl.isNotEmpty ? kDefaultServerUrl : 'ws://');
 
   static const neonCyan = Color(0xFF00E5FF);
   static const darkBg = Color(0xFF0F111A);
@@ -295,7 +295,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Future<bool> _prepare() async {
     final server = _serverController.text.trim();
-    if (server.isEmpty || server == 'wss://') {
+    if (server.isEmpty || server == 'wss://' || server == 'ws://') {
       _snack(t.onbServerRequired);
       return false;
     }

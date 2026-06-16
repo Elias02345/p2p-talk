@@ -21,10 +21,16 @@ guaranteed fallback for strict/symmetric NAT.
 
 ## 1. Signaling — Cloudflare Tunnel
 
-### Option A — CloudGate (recommended; you already use it)
-1. `sudo bash install.sh` (server binds `127.0.0.1:3000`).
-2. In CloudGate, add a service: hostname `p2p-talk.<your-domain>` → `http://localhost:3000`.
-3. Done — the app connects to `wss://p2p-talk.<your-domain>`.
+### Option A — CloudGate VM forwards IP:port over plain HTTP (your setup)
+CloudGate runs on its own VM and forwards a public IP:port to this server.
+1. `sudo PUBLIC_HOST=<cloudgate-ip> bash install.sh` — the signaling server listens
+   on `0.0.0.0:3000` (set `SIGNALING_BIND` to change), reachable from the CloudGate VM.
+2. In CloudGate, forward `<cloudgate-ip>:3000` → `<this-server-ip>:3000` (plain HTTP).
+3. App onboarding: `ws://<cloudgate-ip>:3000`.
+
+> ws:// is **unencrypted on the wire**. The media stays end-to-end encrypted
+> (DTLS-SRTP) and calls are MitM-protected by the signed-fingerprint chain, but
+> for token privacy prefer `wss://` via a domain when you can (Option B).
 
 ### Option B — bundled cloudflared
 1. Create a tunnel in the Cloudflare dashboard, copy the **tunnel token**, and map

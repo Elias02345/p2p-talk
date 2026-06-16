@@ -791,7 +791,7 @@ abstract class AppLocalizations {
   /// No description provided for @onbServerUrl.
   ///
   /// In en, this message translates to:
-  /// **'Server URL (e.g. wss://p2p-talk.example.com)'**
+  /// **'Server URL (e.g. ws://203.0.113.5:3000 or wss://p2p-talk.example.com)'**
   String get onbServerUrl;
 
   /// No description provided for @onbRecoveryTitle.

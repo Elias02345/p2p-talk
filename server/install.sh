@@ -127,13 +127,16 @@ if [[ "${healthy}" == true ]]; then
 else
   warn "Health check did not pass yet — check: journalctl -u ${SERVICE_NAME} -n 100"
 fi
+SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || echo '<server-ip>')"
 echo
-echo "  Signaling (local):  http://127.0.0.1:${PORT_VAL}  (health: /health)"
-echo "  Public URL:         wss://${PUBLIC_HOST:-<your-domain>}  (via CloudGate / reverse proxy)"
-echo "  TURN (relay):       turn(s)://${TURN_HOST:-${PUBLIC_HOST:-<host>}}:${TURN_PORT} / ${TURN_TLS_PORT}"
+echo "  Signaling listens on:  http://${SERVER_IP}:${PORT_VAL}  (health: /health)"
+echo "  App server URL:        ws://${PUBLIC_HOST:-<cloudgate-ip>}:${PORT_VAL}"
+echo "  Relay mode:            $(grep -m1 '^TURN_MODE=' "${ENV_FILE}" | cut -d= -f2 || echo coturn)"
 echo
-echo "  IMPORTANT (cgNAT/CloudGate): forward 443 -> 127.0.0.1:${PORT_VAL} (wss/https)"
-echo "  and forward the TURN TCP/TLS port (${TURN_TLS_PORT}) -> coturn for relay fallback."
+echo "  CloudGate: point it at this server -> ${SERVER_IP}:${PORT_VAL} (plain HTTP)."
+echo "  Then enter in the app onboarding:    ws://${PUBLIC_HOST:-<cloudgate-ip>}:${PORT_VAL}"
 echo
-echo "  Enter this URL in the app's onboarding: wss://${PUBLIC_HOST:-<your-domain>}"
+echo "  NOTE: plain ws:// is unencrypted on the wire. Media stays end-to-end"
+echo "  encrypted (DTLS-SRTP) and calls are MitM-protected, but for token privacy"
+echo "  prefer wss:// via a domain when possible (set PUBLIC_HOST + TLS at CloudGate)."
 echo

@@ -122,7 +122,7 @@
   "onbCreateAccount": "Account erstellen",
   "onbRestoreAccount": "Aus Wiederherstellungsphrase wiederherstellen",
   "onbUsername": "Benutzername",
-  "onbServerUrl": "Server-URL (z. B. wss://p2p-talk.example.com)",
+  "onbServerUrl": "Server-URL (z. B. ws://203.0.113.5:3000 oder wss://p2p-talk.example.com)",
   "onbRecoveryTitle": "Deine Wiederherstellungsphrase",
   "onbRecoveryWarning": "Schreibe diese 24 Wörter auf und bewahre sie sicher auf. Sie sind der EINZIGE Weg, deinen Account wiederherzustellen oder ein weiteres Gerät hinzuzufügen. Teile sie niemals.",
   "onbRecoverySaved": "Ich habe sie notiert",

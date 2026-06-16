@@ -18,7 +18,7 @@ class WebRTCService extends ChangeNotifier {
   final NotificationService _notificationService;
   final AccountService _account;
 
-  String _serverUrl = 'wss://localhost:3000';
+  String _serverUrl = 'ws://localhost:3000';
   WebSocketChannel? _channel;
   bool _isWebSocketConnected = false;
 

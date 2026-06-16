@@ -2,6 +2,22 @@
 
 All notable changes to p2p-talk are documented here.
 
+## [2.0.1] — 2026-06-15
+
+### Added / Changed
+- **Plain HTTP / `ws://` over a CloudGate IP:port** — no domain or TLS required.
+  The signaling server is exposed on `0.0.0.0:PORT` (configurable via
+  `SIGNALING_BIND`) so a separate CloudGate VM can forward `<ip>:<port>` to it.
+- App now permits cleartext `ws://`/`http://` (Android `usesCleartextTraffic`,
+  iOS ATS) and defaults onboarding to `ws://<ip>:<port>`.
+- Relay provider selectable via `TURN_MODE` (`coturn` / `cloudflare` / `static` /
+  `none`); Cloudflare managed TURN documented for cgNAT without a public IP.
+- Build-time `DEFAULT_SERVER_URL` so a released APK can ship preconfigured.
+
+### Security note
+`ws://` is unencrypted on the wire; media remains end-to-end encrypted (DTLS-SRTP)
+and calls are MitM-protected, but `wss://` via a domain is preferred for token privacy.
+
 ## [2.0.0] — 2026-06-15
 
 Major release. Renamed from **GymTalk** to **p2p-talk** and hardened end to end.
